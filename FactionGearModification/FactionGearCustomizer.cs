@@ -74,6 +74,7 @@ namespace FactionGearCustomizer
         public void ResetToDefault()
         {
             factionGearData.Clear();
+            FactionGearManager.LoadDefaultPresets();
             Write();
         }
 
@@ -213,8 +214,20 @@ namespace FactionGearCustomizer
     {
         public static void LoadDefaultPresets()
         {
-            foreach (var factionDef in DefDatabase<FactionDef>.AllDefs)
+            LoadDefaultPresets(null);
+        }
+
+        public static void LoadDefaultPresets(string factionDefName)
+        {
+            var factionDefs = factionDefName != null 
+                ? new List<FactionDef> { DefDatabase<FactionDef>.GetNamedSilentFail(factionDefName) }
+                : DefDatabase<FactionDef>.AllDefs.ToList();
+
+            foreach (var factionDef in factionDefs)
             {
+                if (factionDef == null)
+                    continue;
+
                 var factionData = FactionGearCustomizerMod.Settings.GetOrCreateFactionData(factionDef.defName);
                 if (factionDef.pawnGroupMakers != null)
                 {
@@ -224,10 +237,10 @@ namespace FactionGearCustomizer
                         {
                             foreach (var option in pawnGroupMaker.options)
                             {
-                                if (option.kind != null) // [修复] 错误位置：178行，错误内容：PawnGenOption未包含kindDef的定义
+                                if (option.kind != null)
                                 {
-                                    var kindData = factionData.GetOrCreateKindData(option.kind.defName); // [修复] 错误位置：180行，错误内容：PawnGenOption未包含kindDef的定义
-                                    LoadKindDefGear(option.kind, kindData); // [修复] 错误位置：181行，错误内容：PawnGenOption未包含kindDef的定义
+                                    var kindData = factionData.GetOrCreateKindData(option.kind.defName);
+                                    LoadKindDefGear(option.kind, kindData);
                                 }
                             }
                         }
@@ -553,9 +566,7 @@ namespace FactionGearCustomizer
         private static string selectedKindDefName = "";
         private static GearCategory selectedCategory = GearCategory.Weapons;
 
-        // 多选功能
-        private static List<string> selectedFactionDefNames = new List<string>();
-        private static List<string> selectedKindDefNames = new List<string>();
+
 
         private static Vector2 factionListScrollPos = Vector2.zero;
         private static Vector2 kindListScrollPos = Vector2.zero;
@@ -567,9 +578,21 @@ namespace FactionGearCustomizer
         private static TechLevel? selectedTechLevel = null;
 
         // [重构] 使用环世界官方的区间滑块
+        // 筛选范围
         private static FloatRange rangeFilter = new FloatRange(0f, 100f);
         private static FloatRange damageFilter = new FloatRange(0f, 100f);
-        private static FloatRange marketValueFilter = new FloatRange(0f, 10000f); // 市场价值筛选
+        private static FloatRange marketValueFilter = new FloatRange(0f, 10000f);
+        
+        // 边界值
+        private static float minRange = 0f;
+        private static float maxRange = 100f;
+        private static float minDamage = 0f;
+        private static float maxDamage = 100f;
+        private static float minMarketValue = 0f;
+        private static float maxMarketValue = 10000f;
+        
+        // 边界值计算标志
+        private static bool needCalculateBounds = true;
 
         // 排序相关字段
         private static string sortField = "Name"; // 默认按名称排序
@@ -580,28 +603,74 @@ namespace FactionGearCustomizer
         private static FactionGearPreset selectedPreset = null;
         private static string newPresetName = "";
         private static string newPresetDescription = "";
+        
+        // 复制粘贴功能
+        private static KindGearData copiedKindGearData = null;
+        
+        // 暂存设置
+        private static FactionGearCustomizerSettings tempSettings = null;
 
         public static void DrawEditor(UnityEngine.Rect inRect)
         {
             // 规范化字体为环世界标准字体
             Text.Font = GameFont.Small;
+            
+            // 初始化暂存设置
+            if (tempSettings == null)
+            {
+                tempSettings = new FactionGearCustomizerSettings();
+                // 复制当前设置到暂存设置
+                foreach (var kvp in FactionGearCustomizerMod.Settings.factionGearData)
+                {
+                    tempSettings.factionGearData[kvp.Key] = kvp.Value;
+                }
+                tempSettings.presets.AddRange(FactionGearCustomizerMod.Settings.presets);
+            }
+            
+            // 默认先读取第一个kind
+            if (string.IsNullOrEmpty(selectedFactionDefName) && string.IsNullOrEmpty(selectedKindDefName))
+            {
+                var allFactions = DefDatabase<FactionDef>.AllDefs.OrderBy(f => f.LabelCap.ToString()).ToList();
+                if (allFactions.Any())
+                {
+                    selectedFactionDefName = allFactions.First().defName;
+                    
+                    // 选择该派系的第一个兵种
+                    var factionDef = allFactions.First();
+                    if (factionDef.pawnGroupMakers != null)
+                    {
+                        foreach (var pawnGroupMaker in factionDef.pawnGroupMakers)
+                        {
+                            if (pawnGroupMaker.options != null && pawnGroupMaker.options.Any())
+                            {
+                                var firstOption = pawnGroupMaker.options.First();
+                                if (firstOption.kind != null)
+                                {
+                                    selectedKindDefName = firstOption.kind.defName;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
 
             // 1. 顶部按钮栏：使用 WidgetRow 自动横向排列
             Rect topRect = new Rect(inRect.x, inRect.y, inRect.width, 30f);
             WidgetRow buttonRow = new WidgetRow(topRect.x, topRect.y, UIDirection.RightThenUp, topRect.width, 4f);
 
-            if (buttonRow.ButtonText("Load Default Presets"))
-            {
-                FactionGearManager.LoadDefaultPresets();
-                FactionGearCustomizerMod.Settings.Write();
-            }
-            if (buttonRow.ButtonText("Reset All to Default"))
+            if (buttonRow.ButtonText("Reset All"))
             {
                 FactionGearCustomizerMod.Settings.ResetToDefault();
             }
             if (!string.IsNullOrEmpty(selectedFactionDefName) && buttonRow.ButtonText("Reset Current Faction"))
             {
                 ResetCurrentFaction();
+            }
+            if (!string.IsNullOrEmpty(selectedFactionDefName) && buttonRow.ButtonText("Load Default Faction"))
+            {
+                FactionGearManager.LoadDefaultPresets(selectedFactionDefName);
+                FactionGearCustomizerMod.Settings.Write();
             }
             if (!string.IsNullOrEmpty(selectedKindDefName) && buttonRow.ButtonText("Reset Current Kind"))
             {
@@ -610,6 +679,19 @@ namespace FactionGearCustomizer
             if (buttonRow.ButtonText("Reset Filters"))
             {
                 ResetFilters();
+            }
+
+            if (buttonRow.ButtonText("Save"))
+            {
+                // 将暂存设置保存到实际设置
+                FactionGearCustomizerMod.Settings.factionGearData.Clear();
+                foreach (var kvp in tempSettings.factionGearData)
+                {
+                    FactionGearCustomizerMod.Settings.factionGearData[kvp.Key] = kvp.Value;
+                }
+                FactionGearCustomizerMod.Settings.presets.Clear();
+                FactionGearCustomizerMod.Settings.presets.AddRange(tempSettings.presets);
+                FactionGearCustomizerMod.Settings.Write();
             }
 
             if (buttonRow.ButtonText("Presets"))
@@ -776,28 +858,58 @@ namespace FactionGearCustomizer
                 else if (Mouse.IsOver(rowRect))
                     Widgets.DrawHighlight(rowRect);
 
-                // 绘制复选框
-                Vector2 checkBoxPos = new Vector2(rowRect.x, rowRect.y + 2f);
-                bool isSelected = selectedFactionDefNames.Contains(factionDef.defName);
-                bool originalIsSelected = isSelected;
-                Widgets.Checkbox(checkBoxPos, ref isSelected);
-                if (isSelected != originalIsSelected)
+                // 检查该派系是否被修改过
+                bool isModified = false;
+                var factionData = FactionGearCustomizerMod.Settings.GetOrCreateFactionData(factionDef.defName);
+                if (factionData.kindGearData.Any(kv => kv.Value.isModified))
                 {
-                    if (isSelected)
-                        selectedFactionDefNames.Add(factionDef.defName);
-                    else
-                        selectedFactionDefNames.Remove(factionDef.defName);
+                    isModified = true;
                 }
 
                 // 绘制派系名称
-                Rect labelRect = new Rect(rowRect.x + 25f, rowRect.y, rowRect.width - 25f, rowRect.height);
-                Widgets.Label(labelRect, factionDef.LabelCap);
+                Rect labelRect = new Rect(rowRect.x, rowRect.y, rowRect.width - 20f, rowRect.height);
+                string labelText = factionDef.LabelCap;
+                
+                // 为修改过的派系添加视觉标记
+                if (isModified)
+                {
+                    labelText = $"*{labelText}*";
+                    Text.Anchor = TextAnchor.MiddleLeft;
+                    Text.Font = GameFont.Tiny;
+                    GUI.color = Color.yellow;
+                    Widgets.Label(labelRect, labelText);
+                    GUI.color = Color.white;
+                    Text.Font = GameFont.Small;
+                    Text.Anchor = TextAnchor.UpperLeft;
+                }
+                else
+                {
+                    Widgets.Label(labelRect, labelText);
+                }
 
                 // 点击派系名称时设置为当前选中派系
-                if (Widgets.ButtonInvisible(new Rect(rowRect.x + 25f, rowRect.y, rowRect.width - 25f, rowRect.height)))
+                if (Widgets.ButtonInvisible(new Rect(rowRect.x + 25f, rowRect.y, rowRect.width - 25f - 100f, rowRect.height)))
                 {
                     selectedFactionDefName = factionDef.defName;
                     selectedKindDefName = "";
+                    
+                    // 选择该派系的第一个兵种
+                    if (factionDef.pawnGroupMakers != null)
+                    {
+                        foreach (var pawnGroupMaker in factionDef.pawnGroupMakers)
+                        {
+                            if (pawnGroupMaker.options != null && pawnGroupMaker.options.Any())
+                            {
+                                var firstOption = pawnGroupMaker.options.First();
+                                if (firstOption.kind != null)
+                                {
+                                    selectedKindDefName = firstOption.kind.defName;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    
                     // 重置滚动位置，确保列表更新后正确显示
                     kindListScrollPos = Vector2.zero;
                     gearListScrollPos = Vector2.zero;
@@ -851,19 +963,6 @@ namespace FactionGearCustomizer
                 else if (Mouse.IsOver(rowRect))
                     Widgets.DrawHighlight(rowRect);
 
-                // 绘制复选框
-                Vector2 checkBoxPos = new Vector2(rowRect.x, rowRect.y + 2f);
-                bool isSelected = selectedKindDefNames.Contains(kindDef.defName);
-                bool originalIsSelected = isSelected;
-                Widgets.Checkbox(checkBoxPos, ref isSelected);
-                if (isSelected != originalIsSelected)
-                {
-                    if (isSelected)
-                        selectedKindDefNames.Add(kindDef.defName);
-                    else
-                        selectedKindDefNames.Remove(kindDef.defName);
-                }
-
                 // 检查该兵种是否被修改过
                 bool isModified = false;
                 if (!string.IsNullOrEmpty(selectedFactionDefName))
@@ -876,24 +975,199 @@ namespace FactionGearCustomizer
                 }
 
                 // 绘制兵种名称
-                Rect labelRect = new Rect(rowRect.x + 25f, rowRect.y, rowRect.width - 25f - 20f, rowRect.height);
-                Widgets.Label(labelRect, kindDef.LabelCap);
-
+                Rect labelRect = new Rect(rowRect.x, rowRect.y, rowRect.width - 20f, rowRect.height);
+                string labelText = kindDef.LabelCap;
+                
                 // 为修改过的兵种添加视觉标记
                 if (isModified)
                 {
-                    Rect modIconRect = new Rect(rowRect.xMax - 20f, rowRect.y + 2f, 16f, 16f);
+                    labelText = $"*{labelText}*";
+                    Text.Anchor = TextAnchor.MiddleLeft;
+                    Text.Font = GameFont.Tiny;
                     GUI.color = Color.yellow;
-                    Widgets.DrawBox(modIconRect);
+                    Widgets.Label(labelRect, labelText);
                     GUI.color = Color.white;
+                    Text.Font = GameFont.Small;
+                    Text.Anchor = TextAnchor.UpperLeft;
+                }
+                else
+                {
+                    Widgets.Label(labelRect, labelText);
                 }
 
                 // 点击兵种名称时设置为当前选中兵种
-                if (Widgets.ButtonInvisible(new Rect(rowRect.x + 25f, rowRect.y, rowRect.width - 25f, rowRect.height)))
+                if (Widgets.ButtonInvisible(new Rect(rowRect.x + 25f, rowRect.y, rowRect.width - 25f - 140f, rowRect.height)))
                 {
                     selectedKindDefName = kindDef.defName;
                     // 重置滚动位置，确保物品列表更新后正确显示
                     gearListScrollPos = Vector2.zero;
+                }
+                
+                // 添加Copy图标
+                Rect copyIconRect = new Rect(rowRect.xMax - 100f, rowRect.y, 20f, 20f);
+                if (Widgets.ButtonInvisible(copyIconRect))
+                {
+                    var factionData = FactionGearCustomizerMod.Settings.GetOrCreateFactionData(selectedFactionDefName);
+                    var kindData = factionData.GetOrCreateKindData(kindDef.defName);
+                    CopyKindDefGear();
+                }
+                // 绘制复制图标（使用try-catch避免ContentFinder错误）
+                if (Widgets.ButtonInvisible(copyIconRect))
+                {
+                    var factionData = FactionGearCustomizerMod.Settings.GetOrCreateFactionData(selectedFactionDefName);
+                    var kindData = factionData.GetOrCreateKindData(kindDef.defName);
+                    CopyKindDefGear();
+                }
+                try
+                {
+                    // 尝试加载复制图标 - 使用更安全的方式，避免ContentFinder的错误日志
+                    Texture2D copyTexture = null;
+                    try
+                    {
+                        copyTexture = ContentFinder<Texture2D>.Get("UI/Buttons/Copy", false);
+                    }
+                    catch {}
+                    if (copyTexture != null)
+                    {
+                        Widgets.DrawTextureFitted(copyIconRect, copyTexture, 1f);
+                    }
+                    else
+                    {
+                        Widgets.Label(copyIconRect, "C");
+                    }
+                }
+                catch (Exception e)
+                {
+                    // 出错时显示替代标签
+                    Widgets.Label(copyIconRect, "C");
+                }
+                
+                // 常驻显示Paste图标
+                Rect pasteIconRect = new Rect(rowRect.xMax - 70f, rowRect.y, 20f, 20f);
+                try
+                {
+                    if (copiedKindGearData != null)
+                    {
+                        if (Widgets.ButtonInvisible(pasteIconRect))
+                        {
+                            var factionData = FactionGearCustomizerMod.Settings.GetOrCreateFactionData(selectedFactionDefName);
+                            var kindData = factionData.GetOrCreateKindData(kindDef.defName);
+                            PasteKindDefGear();
+                            // 确保设置修改标记
+                            kindData.isModified = true;
+                        }
+                        // 尝试加载粘贴图标 - 使用更安全的方式，避免ContentFinder的错误日志
+                        Texture2D pasteTexture = null;
+                        try
+                        {
+                            pasteTexture = ContentFinder<Texture2D>.Get("UI/Buttons/Paste", false);
+                        }
+                        catch {}
+                        if (pasteTexture != null)
+                        {
+                            Widgets.DrawTextureFitted(pasteIconRect, pasteTexture, 1f);
+                        }
+                        else
+                        {
+                            Widgets.Label(pasteIconRect, "P");
+                        }
+                    }
+                    else
+                    {
+                        // 当没有复制数据时，显示灰色的粘贴图标
+                        GUI.color = Color.grey;
+                        Texture2D pasteTexture = null;
+                        try
+                        {
+                            pasteTexture = ContentFinder<Texture2D>.Get("UI/Buttons/Paste", false);
+                        }
+                        catch {}
+                        if (pasteTexture != null)
+                        {
+                            Widgets.DrawTextureFitted(pasteIconRect, pasteTexture, 1f);
+                        }
+                        else
+                        {
+                            Widgets.Label(pasteIconRect, "P");
+                        }
+                        GUI.color = Color.white;
+                    }
+                }
+                catch (Exception e)
+                {
+                    // 出错时显示替代标签
+                    if (copiedKindGearData != null)
+                    {
+                        Widgets.Label(pasteIconRect, "P");
+                    }
+                    else
+                    {
+                        GUI.color = Color.grey;
+                        Widgets.Label(pasteIconRect, "P");
+                        GUI.color = Color.white;
+                    }
+                }
+                
+                // 添加应用到本faction其他所有kind的图标
+                Rect applyAllIconRect = new Rect(rowRect.xMax - 40f, rowRect.y, 20f, 20f);
+                try
+                {
+                    if (copiedKindGearData != null)
+                    {
+                        if (Widgets.ButtonInvisible(applyAllIconRect))
+                        {
+                            ApplyToAllKindsInFaction();
+                        }
+                        // 尝试加载应用图标 - 使用更安全的方式，避免ContentFinder的错误日志
+                        Texture2D applyTexture = null;
+                        try
+                        {
+                            applyTexture = ContentFinder<Texture2D>.Get("UI/Buttons/Apply", false);
+                        }
+                        catch {}
+                        if (applyTexture != null)
+                        {
+                            Widgets.DrawTextureFitted(applyAllIconRect, applyTexture, 1f);
+                        }
+                        else
+                        {
+                            Widgets.Label(applyAllIconRect, "A");
+                        }
+                    }
+                    else
+                    {
+                        // 当没有复制数据时，显示灰色的应用图标
+                        GUI.color = Color.grey;
+                        Texture2D applyTexture = null;
+                        try
+                        {
+                            applyTexture = ContentFinder<Texture2D>.Get("UI/Buttons/Apply", false);
+                        }
+                        catch {}
+                        if (applyTexture != null)
+                        {
+                            Widgets.DrawTextureFitted(applyAllIconRect, applyTexture, 1f);
+                        }
+                        else
+                        {
+                            Widgets.Label(applyAllIconRect, "A");
+                        }
+                        GUI.color = Color.white;
+                    }
+                }
+                catch (Exception e)
+                {
+                    // 出错时显示替代标签
+                    if (copiedKindGearData != null)
+                    {
+                        Widgets.Label(applyAllIconRect, "A");
+                    }
+                    else
+                    {
+                        GUI.color = Color.grey;
+                        Widgets.Label(applyAllIconRect, "A");
+                        GUI.color = Color.white;
+                    }
                 }
                 kindListing.Gap(2f);
             }
@@ -925,8 +1199,12 @@ namespace FactionGearCustomizer
             DrawCategoryTabs(tabRect);
 
             // 计算价值权重预览区域的高度
-            float previewHeight = 80f;
+            float previewHeight = 100f;
             Rect listOutRect = new Rect(innerRect.x, tabRect.yMax + 5f, innerRect.width, innerRect.height - 24f - 24f - previewHeight - 10f);
+            
+            // 确保列表区域高度为正
+            if (listOutRect.height < 100f)
+                listOutRect.height = 100f;
 
             List<GearItem> gearItemsToDraw = new List<GearItem>();
             KindGearData currentKindData = null;
@@ -983,10 +1261,8 @@ namespace FactionGearCustomizer
             Rect filterRect = new Rect(innerRect.x, innerRect.y + 24f, innerRect.width, 150f);
             DrawFilters(filterRect);
 
-            // 计算列表和滑块区域
-            float sliderHeight = 40f;
-            Rect listOutRect = new Rect(innerRect.x, filterRect.yMax + 5f, innerRect.width, innerRect.height - 24f - filterRect.height - sliderHeight - 10f);
-            Rect marketValueSliderRect = new Rect(innerRect.x, listOutRect.yMax + 5f, innerRect.width, sliderHeight);
+            // 计算列表区域
+            Rect listOutRect = new Rect(innerRect.x, filterRect.yMax + 5f, innerRect.width, innerRect.height - 24f - filterRect.height - 10f);
 
             var libraryItems = GetFilteredItems();
             Rect listViewRect = new Rect(0, 0, listOutRect.width - 16f, libraryItems.Count * 46f);
@@ -1002,15 +1278,18 @@ namespace FactionGearCustomizer
             libListing.End();
             Widgets.EndScrollView();
 
-            // 绘制Market Value滑块
-            Widgets.Label(new Rect(marketValueSliderRect.x, marketValueSliderRect.y, 100f, 20f), "Market Value");
-            Rect sliderRect = new Rect(marketValueSliderRect.x + 100f, marketValueSliderRect.y, marketValueSliderRect.width - 160f, 20f);
-            marketValueFilter.max = Widgets.HorizontalSlider(sliderRect, marketValueFilter.max, 0f, 10000f);
-            Widgets.Label(new Rect(marketValueSliderRect.x + marketValueSliderRect.width - 60f, marketValueSliderRect.y, 60f, 20f), $"{marketValueFilter.max:F0}");
+
         }
 
         private static void DrawFilters(Rect rect)
         {
+            // 检查是否需要计算边界值
+            if (needCalculateBounds)
+            {
+                CalculateFilterBounds();
+                needCalculateBounds = false;
+            }
+            
             Listing_Standard listing = new Listing_Standard();
             listing.Begin(rect);
 
@@ -1070,14 +1349,18 @@ namespace FactionGearCustomizer
             if (selectedCategory == GearCategory.Weapons)
             {
                 Rect rangeRect = listing.GetRect(28f);
-                Widgets.FloatRange(rangeRect, 1, ref rangeFilter, 0f, 100f, "Range", ToStringStyle.FloatOne);
+                Widgets.FloatRange(rangeRect, 1, ref rangeFilter, minRange, maxRange, "Range", ToStringStyle.FloatOne);
             }
 
             if (selectedCategory == GearCategory.Weapons || selectedCategory == GearCategory.MeleeWeapons)
             {
                 Rect damageRect = listing.GetRect(28f);
-                Widgets.FloatRange(damageRect, 2, ref damageFilter, 0f, 100f, "Damage", ToStringStyle.FloatOne);
+                Widgets.FloatRange(damageRect, 2, ref damageFilter, minDamage, maxDamage, "Damage", ToStringStyle.FloatOne);
             }
+
+            // 市场价值滑块（与其他滑块样式一致）
+            Rect marketValueRect = listing.GetRect(28f);
+            Widgets.FloatRange(marketValueRect, 3, ref marketValueFilter, minMarketValue, maxMarketValue, "MarketValue", ToStringStyle.FloatOne);
 
 
 
@@ -1112,7 +1395,60 @@ namespace FactionGearCustomizer
                 if (Widgets.ButtonInvisible(tab))
                 {
                     selectedCategory = category;
+                    // 标记需要重新计算边界值
+                    needCalculateBounds = true;
                 }
+            }
+        }
+
+        private static void CalculateFilterBounds()
+        {
+            List<ThingDef> items = GetFilteredItems();
+            if (!items.Any()) return;
+
+            // 计算射程边界
+            if (selectedCategory == GearCategory.Weapons)
+            {
+                var ranges = items.Select(t => FactionGearManager.GetWeaponRange(t)).Where(r => r > 0).ToList();
+                if (ranges.Any())
+                {
+                    minRange = ranges.Min();
+                    maxRange = ranges.Max();
+                }
+                else
+                {
+                    minRange = 0f;
+                    maxRange = 100f;
+                }
+            }
+
+            // 计算伤害边界
+            if (selectedCategory == GearCategory.Weapons || selectedCategory == GearCategory.MeleeWeapons)
+            {
+                var damages = items.Select(t => FactionGearManager.GetWeaponDamage(t)).Where(d => d > 0).ToList();
+                if (damages.Any())
+                {
+                    minDamage = damages.Min();
+                    maxDamage = damages.Max();
+                }
+                else
+                {
+                    minDamage = 0f;
+                    maxDamage = 100f;
+                }
+            }
+
+            // 计算市场价值边界
+            var marketValues = items.Select(t => t.BaseMarketValue).Where(v => v > 0).ToList();
+            if (marketValues.Any())
+            {
+                minMarketValue = marketValues.Min();
+                maxMarketValue = marketValues.Max();
+            }
+            else
+            {
+                minMarketValue = 0f;
+                maxMarketValue = 10000f;
             }
         }
 
@@ -1280,6 +1616,77 @@ namespace FactionGearCustomizer
             searchText = "";
             sortField = "Name";
             sortAscending = true;
+            // 标记需要重新计算边界值
+            needCalculateBounds = true;
+        }
+
+        // 复制KindDef装备
+        private static void CopyKindDefGear()
+        {
+            if (string.IsNullOrEmpty(selectedFactionDefName) || string.IsNullOrEmpty(selectedKindDefName))
+                return;
+
+            var factionData = FactionGearCustomizerMod.Settings.GetOrCreateFactionData(selectedFactionDefName);
+            var kindData = factionData.GetOrCreateKindData(selectedKindDefName);
+
+            // 创建深拷贝
+            copiedKindGearData = new KindGearData(kindData.kindDefName);
+            copiedKindGearData.weapons = kindData.weapons.Select(g => new GearItem(g.thingDefName, g.weight)).ToList();
+            copiedKindGearData.meleeWeapons = kindData.meleeWeapons.Select(g => new GearItem(g.thingDefName, g.weight)).ToList();
+            copiedKindGearData.armors = kindData.armors.Select(g => new GearItem(g.thingDefName, g.weight)).ToList();
+            copiedKindGearData.apparel = kindData.apparel.Select(g => new GearItem(g.thingDefName, g.weight)).ToList();
+            copiedKindGearData.accessories = kindData.accessories.Select(g => new GearItem(g.thingDefName, g.weight)).ToList();
+            copiedKindGearData.isModified = kindData.isModified;
+        }
+
+        // 粘贴KindDef装备
+        private static void PasteKindDefGear()
+        {
+            if (string.IsNullOrEmpty(selectedFactionDefName) || string.IsNullOrEmpty(selectedKindDefName) || copiedKindGearData == null)
+                return;
+
+            var factionData = FactionGearCustomizerMod.Settings.GetOrCreateFactionData(selectedFactionDefName);
+            var kindData = factionData.GetOrCreateKindData(selectedKindDefName);
+
+            // 粘贴数据
+            kindData.weapons = copiedKindGearData.weapons.Select(g => new GearItem(g.thingDefName, g.weight)).ToList();
+            kindData.meleeWeapons = copiedKindGearData.meleeWeapons.Select(g => new GearItem(g.thingDefName, g.weight)).ToList();
+            kindData.armors = copiedKindGearData.armors.Select(g => new GearItem(g.thingDefName, g.weight)).ToList();
+            kindData.apparel = copiedKindGearData.apparel.Select(g => new GearItem(g.thingDefName, g.weight)).ToList();
+            kindData.accessories = copiedKindGearData.accessories.Select(g => new GearItem(g.thingDefName, g.weight)).ToList();
+            kindData.isModified = true;
+
+            FactionGearCustomizerMod.Settings.Write();
+        }
+
+        // 应用到本faction其他所有kind
+        private static void ApplyToAllKindsInFaction()
+        {
+            if (string.IsNullOrEmpty(selectedFactionDefName) || copiedKindGearData == null)
+                return;
+
+            var factionData = FactionGearCustomizerMod.Settings.GetOrCreateFactionData(selectedFactionDefName);
+            
+            // 遍历派系中的所有兵种
+            foreach (var kvp in factionData.kindGearData)
+            {
+                var kindDefName = kvp.Key;
+                var kindData = kvp.Value;
+                
+                // 跳过当前选中的兵种
+                if (kindDefName == selectedKindDefName)
+                    continue;
+                
+                // 粘贴数据
+                kindData.weapons = copiedKindGearData.weapons.Select(g => new GearItem(g.thingDefName, g.weight)).ToList();
+                kindData.meleeWeapons = copiedKindGearData.meleeWeapons.Select(g => new GearItem(g.thingDefName, g.weight)).ToList();
+                kindData.armors = copiedKindGearData.armors.Select(g => new GearItem(g.thingDefName, g.weight)).ToList();
+                kindData.apparel = copiedKindGearData.apparel.Select(g => new GearItem(g.thingDefName, g.weight)).ToList();
+                kindData.accessories = copiedKindGearData.accessories.Select(g => new GearItem(g.thingDefName, g.weight)).ToList();
+                kindData.isModified = true;
+            }
+
+            FactionGearCustomizerMod.Settings.Write();
         }
 
         private static List<string> GetAllModSources()
@@ -1516,106 +1923,306 @@ namespace FactionGearCustomizer
 
         private static void AutoFillGear()
         {
-            // 处理所有选中的派系
-            var factionDefNames = selectedFactionDefNames.Any() ? selectedFactionDefNames : new List<string> { selectedFactionDefName };
+            // 处理当前选中的派系
+            if (string.IsNullOrEmpty(selectedFactionDefName))
+                return;
+
+            var factionData = FactionGearCustomizerMod.Settings.GetOrCreateFactionData(selectedFactionDefName);
             
-            foreach (var factionDefName in factionDefNames)
+            // 处理当前选中的兵种
+            if (string.IsNullOrEmpty(selectedKindDefName))
+                return;
+
+            var kindData = factionData.GetOrCreateKindData(selectedKindDefName);
+            var kindDef = DefDatabase<PawnKindDef>.GetNamedSilentFail(selectedKindDefName);
+
+            if (kindDef == null)
+                return;
+
+            // 基于兵种标签添加武器
+            if (kindDef.weaponTags != null && kindDef.weaponTags.Any())
             {
-                if (string.IsNullOrEmpty(factionDefName))
-                    continue;
-
-                var factionData = FactionGearCustomizerMod.Settings.GetOrCreateFactionData(factionDefName);
-                
-                // 处理所有选中的兵种
-                var kindDefNames = selectedKindDefNames.Any() ? selectedKindDefNames : new List<string> { selectedKindDefName };
-                
-                foreach (var kindDefName in kindDefNames)
+                foreach (var tag in kindDef.weaponTags)
                 {
-                    if (string.IsNullOrEmpty(kindDefName))
-                        continue;
-
-                    var kindData = factionData.GetOrCreateKindData(kindDefName);
-                    var kindDef = DefDatabase<PawnKindDef>.GetNamedSilentFail(kindDefName);
-
-                    if (kindDef == null)
-                        continue;
-
-                    // 基于兵种标签添加武器
-                    if (kindDef.weaponTags != null && kindDef.weaponTags.Any())
+                    var weapons = DefDatabase<ThingDef>.AllDefs.Where(t => t.IsWeapon && t.weaponTags != null && t.weaponTags.Contains(tag)).Take(3).ToList();
+                    foreach (var weapon in weapons)
                     {
-                        foreach (var tag in kindDef.weaponTags)
+                        if (weapon.IsRangedWeapon && !kindData.weapons.Any(g => g.thingDefName == weapon.defName))
                         {
-                            var weapons = DefDatabase<ThingDef>.AllDefs.Where(t => t.IsWeapon && t.weaponTags != null && t.weaponTags.Contains(tag)).Take(3).ToList();
-                            foreach (var weapon in weapons)
-                            {
-                                if (weapon.IsRangedWeapon && !kindData.weapons.Any(g => g.thingDefName == weapon.defName))
-                                {
-                                    kindData.weapons.Add(new GearItem(weapon.defName));
-                                }
-                                else if (weapon.IsMeleeWeapon && !kindData.meleeWeapons.Any(g => g.thingDefName == weapon.defName))
-                                {
-                                    kindData.meleeWeapons.Add(new GearItem(weapon.defName));
-                                }
-                            }
+                            kindData.weapons.Add(new GearItem(weapon.defName));
+                        }
+                        else if (weapon.IsMeleeWeapon && !kindData.meleeWeapons.Any(g => g.thingDefName == weapon.defName))
+                        {
+                            kindData.meleeWeapons.Add(new GearItem(weapon.defName));
                         }
                     }
-                    else
+                }
+            }
+            else
+            {
+                // 如果没有武器标签，添加一些基本武器
+                if (!kindData.weapons.Any())
+                {
+                    var basicWeapons = DefDatabase<ThingDef>.AllDefs.Where(t => t.IsRangedWeapon).Take(2).ToList();
+                    foreach (var weapon in basicWeapons)
                     {
-                        // 如果没有武器标签，添加一些基本武器
-                        if (!kindData.weapons.Any())
-                        {
-                            var basicWeapons = DefDatabase<ThingDef>.AllDefs.Where(t => t.IsRangedWeapon).Take(2).ToList();
-                            foreach (var weapon in basicWeapons)
-                            {
-                                kindData.weapons.Add(new GearItem(weapon.defName));
-                            }
-                        }
-                        if (!kindData.meleeWeapons.Any())
-                        {
-                            var basicMeleeWeapons = DefDatabase<ThingDef>.AllDefs.Where(t => t.IsMeleeWeapon).Take(2).ToList();
-                            foreach (var weapon in basicMeleeWeapons)
-                            {
-                                kindData.meleeWeapons.Add(new GearItem(weapon.defName));
-                            }
-                        }
+                        kindData.weapons.Add(new GearItem(weapon.defName));
                     }
-
-                    // 添加基本装甲
-                    if (!kindData.armors.Any())
+                }
+                if (!kindData.meleeWeapons.Any())
+                {
+                    var basicMeleeWeapons = DefDatabase<ThingDef>.AllDefs.Where(t => t.IsMeleeWeapon).Take(2).ToList();
+                    foreach (var weapon in basicMeleeWeapons)
                     {
-                        var armors = FactionGearManager.GetAllArmors().Take(2).ToList();
-                        foreach (var armor in armors)
-                        {
-                            kindData.armors.Add(new GearItem(armor.defName));
-                        }
+                        kindData.meleeWeapons.Add(new GearItem(weapon.defName));
                     }
-
-                    // 添加基本衣物
-                    if (!kindData.apparel.Any())
-                    {
-                        var apparels = FactionGearManager.GetAllApparel().Take(2).ToList();
-                        foreach (var apparel in apparels)
-                        {
-                            kindData.apparel.Add(new GearItem(apparel.defName));
-                        }
-                    }
-
-                    // 添加基本饰品
-                    if (!kindData.accessories.Any())
-                    {
-                        var accessories = FactionGearManager.GetAllAccessories().Take(1).ToList();
-                        foreach (var accessory in accessories)
-                        {
-                            kindData.accessories.Add(new GearItem(accessory.defName));
-                        }
-                    }
-
-                    kindData.isModified = true;
                 }
             }
 
+            // 获取默认预设装备（模拟原版装备）
+            var defaultApparel = GetDefaultApparelForKindDef(kindDef);
+            
+            // 获取当前自定义装备
+            var currentApparel = GetCurrentApparel(kindData);
+            
+            // 分析身体区域覆盖
+            var defaultBodyParts = GetCoveredBodyParts(defaultApparel);
+            var currentBodyParts = GetCoveredBodyParts(currentApparel);
+            
+            // 找出缺失的身体区域覆盖
+            var missingBodyParts = defaultBodyParts.Except(currentBodyParts).ToList();
+            
+            // 为缺失的身体区域添加装备
+            foreach (var bodyPart in missingBodyParts)
+            {
+                AddApparelForBodyPart(kindData, bodyPart, defaultApparel);
+            }
+            
+            // 检查价值相近的装备
+            CheckAndAddValueSimilarApparel(kindData, defaultApparel, currentApparel);
+
+            kindData.isModified = true;
+
             // 保存设置
             FactionGearCustomizerMod.Settings.Write();
+        }
+
+        // 获取兵种的默认装备（模拟原版预设）
+        private static List<ThingDef> GetDefaultApparelForKindDef(PawnKindDef kindDef)
+        {
+            List<ThingDef> defaultApparel = new List<ThingDef>();
+            
+            // 基于兵种科技等级和标签添加默认装备
+            TechLevel techLevel = TechLevel.Industrial; // 默认科技等级
+            
+            // 添加头盔
+            var helmets = FactionGearManager.GetAllHelmets()
+                .Where(h => h.techLevel <= techLevel)
+                .OrderByDescending(h => h.BaseMarketValue)
+                .Take(1)
+                .ToList();
+            defaultApparel.AddRange(helmets);
+            
+            // 添加装甲
+            var armors = FactionGearManager.GetAllArmors()
+                .Where(a => a.techLevel <= techLevel)
+                .OrderByDescending(a => a.BaseMarketValue)
+                .Take(1)
+                .ToList();
+            defaultApparel.AddRange(armors);
+            
+            // 添加衣物
+            var apparels = FactionGearManager.GetAllApparel()
+                .Where(a => a.techLevel <= techLevel)
+                .OrderByDescending(a => a.BaseMarketValue)
+                .Take(2)
+                .ToList();
+            defaultApparel.AddRange(apparels);
+            
+            // 添加饰品
+            var accessories = FactionGearManager.GetAllAccessories()
+                .Where(a => a.techLevel <= techLevel)
+                .OrderByDescending(a => a.BaseMarketValue)
+                .Take(1)
+                .ToList();
+            defaultApparel.AddRange(accessories);
+            
+            return defaultApparel;
+        }
+
+        // 获取当前自定义装备
+        private static List<ThingDef> GetCurrentApparel(KindGearData kindData)
+        {
+            List<ThingDef> currentApparel = new List<ThingDef>();
+            
+            // 添加装甲
+            currentApparel.AddRange(kindData.armors
+                .Select(g => g.ThingDef)
+                .Where(t => t != null));
+            
+            // 添加衣物
+            currentApparel.AddRange(kindData.apparel
+                .Select(g => g.ThingDef)
+                .Where(t => t != null));
+            
+            // 添加饰品
+            currentApparel.AddRange(kindData.accessories
+                .Select(g => g.ThingDef)
+                .Where(t => t != null));
+            
+            return currentApparel;
+        }
+
+        // 获取装备覆盖的身体区域
+        private static List<BodyPartGroupDef> GetCoveredBodyParts(List<ThingDef> apparel)
+        {
+            List<BodyPartGroupDef> bodyParts = new List<BodyPartGroupDef>();
+            
+            foreach (var thingDef in apparel)
+            {
+                if (thingDef.IsApparel && thingDef.apparel != null && thingDef.apparel.bodyPartGroups != null)
+                {
+                    bodyParts.AddRange(thingDef.apparel.bodyPartGroups);
+                }
+            }
+            
+            return bodyParts.Distinct().ToList();
+        }
+
+        // 为特定身体区域添加装备
+        private static void AddApparelForBodyPart(KindGearData kindData, BodyPartGroupDef bodyPart, List<ThingDef> defaultApparel)
+        {
+            // 查找默认装备中覆盖该身体区域的装备
+            var defaultItems = defaultApparel
+                .Where(a => a.IsApparel && a.apparel != null && a.apparel.bodyPartGroups != null && a.apparel.bodyPartGroups.Contains(bodyPart))
+                .ToList();
+            
+            if (!defaultItems.Any())
+                return;
+            
+            // 获取价值最高的默认装备作为参考
+            var referenceItem = defaultItems.OrderByDescending(i => i.BaseMarketValue).First();
+            float referenceValue = referenceItem.BaseMarketValue;
+            
+            // 查找当前装备中覆盖该身体区域的装备
+            var currentItems = GetCurrentApparel(kindData)
+                .Where(a => a.apparel != null && a.apparel.bodyPartGroups != null && a.apparel.bodyPartGroups.Contains(bodyPart))
+                .ToList();
+            
+            // 如果已经有装备覆盖该身体区域，跳过
+            if (currentItems.Any())
+                return;
+            
+            // 查找价值相近的装备
+            var valueSimilarItems = DefDatabase<ThingDef>.AllDefs
+                .Where(t => t.IsApparel && t.apparel != null && t.apparel.bodyPartGroups != null && t.apparel.bodyPartGroups.Contains(bodyPart))
+                .Where(t => IsValueSimilar(t.BaseMarketValue, referenceValue))
+                .OrderByDescending(t => t.BaseMarketValue)
+                .Take(1)
+                .ToList();
+            
+            // 添加装备到合适的类别
+            foreach (var item in valueSimilarItems.Any() ? valueSimilarItems : defaultItems.Take(1))
+            {
+                if (item.apparel.layers != null && item.apparel.layers.Contains(ApparelLayerDefOf.Overhead))
+                {
+                    // 头盔 - 这里暂时不处理，因为我们通常通过其他方式添加
+                }
+                else if (item.apparel.layers != null && (item.apparel.layers.Contains(ApparelLayerDefOf.Shell) || item.GetStatValueAbstract(StatDefOf.ArmorRating_Sharp) > 0.4f))
+                {
+                    // 装甲
+                    if (!kindData.armors.Any(g => g.thingDefName == item.defName))
+                    {
+                        kindData.armors.Add(new GearItem(item.defName));
+                    }
+                }
+                else if (item.apparel.layers != null && item.apparel.layers.Contains(ApparelLayerDefOf.Belt))
+                {
+                    // 饰品
+                    if (!kindData.accessories.Any(g => g.thingDefName == item.defName))
+                    {
+                        kindData.accessories.Add(new GearItem(item.defName));
+                    }
+                }
+                else
+                {
+                    // 普通衣物
+                    if (!kindData.apparel.Any(g => g.thingDefName == item.defName))
+                    {
+                        kindData.apparel.Add(new GearItem(item.defName));
+                    }
+                }
+            }
+        }
+
+        // 检查并添加价值相近的装备
+        private static void CheckAndAddValueSimilarApparel(KindGearData kindData, List<ThingDef> defaultApparel, List<ThingDef> currentApparel)
+        {
+            foreach (var defaultItem in defaultApparel)
+            {
+                if (!defaultItem.IsApparel)
+                    continue;
+                
+                // 检查当前装备中是否有覆盖相同身体区域的装备
+                var defaultBodyParts = defaultItem.apparel?.bodyPartGroups ?? new List<BodyPartGroupDef>();
+                bool hasSimilarCoverage = currentApparel.Any(c => 
+                    c.apparel != null && 
+                    c.apparel.bodyPartGroups != null && 
+                    defaultBodyParts.Intersect(c.apparel.bodyPartGroups).Any());
+                
+                if (hasSimilarCoverage)
+                    continue;
+                
+                // 检查是否有价值相近的装备
+                bool hasValueSimilar = currentApparel.Any(c => 
+                    c.apparel != null && 
+                    c.apparel.bodyPartGroups != null && 
+                    defaultBodyParts.Intersect(c.apparel.bodyPartGroups).Any() && 
+                    IsValueSimilar(c.BaseMarketValue, defaultItem.BaseMarketValue));
+                
+                if (hasValueSimilar)
+                    continue;
+                
+                // 添加默认装备
+                if (defaultItem.apparel.layers != null && defaultItem.apparel.layers.Contains(ApparelLayerDefOf.Overhead))
+                {
+                    // 头盔 - 这里暂时不处理
+                }
+                else if (defaultItem.apparel.layers != null && (defaultItem.apparel.layers.Contains(ApparelLayerDefOf.Shell) || defaultItem.GetStatValueAbstract(StatDefOf.ArmorRating_Sharp) > 0.4f))
+                {
+                    // 装甲
+                    if (!kindData.armors.Any(g => g.thingDefName == defaultItem.defName))
+                    {
+                        kindData.armors.Add(new GearItem(defaultItem.defName));
+                    }
+                }
+                else if (defaultItem.apparel.layers != null && defaultItem.apparel.layers.Contains(ApparelLayerDefOf.Belt))
+                {
+                    // 饰品
+                    if (!kindData.accessories.Any(g => g.thingDefName == defaultItem.defName))
+                    {
+                        kindData.accessories.Add(new GearItem(defaultItem.defName));
+                    }
+                }
+                else
+                {
+                    // 普通衣物
+                    if (!kindData.apparel.Any(g => g.thingDefName == defaultItem.defName))
+                    {
+                        kindData.apparel.Add(new GearItem(defaultItem.defName));
+                    }
+                }
+            }
+        }
+
+        // 检查两个值是否相近（上下浮动20%）
+        private static bool IsValueSimilar(float value1, float value2)
+        {
+            if (value1 <= 0 || value2 <= 0)
+                return false;
+            
+            float ratio = Mathf.Max(value1, value2) / Mathf.Min(value1, value2);
+            return ratio <= 1.2f; // 20% 浮动
         }
 
         private static void RemoveInvalidGearItems(List<GearItem> gearItems)
@@ -1715,16 +2322,13 @@ namespace FactionGearCustomizer
             Widgets.DrawMenuSection(rect);
             Rect innerRect = rect.ContractedBy(5f);
 
-            Widgets.Label(new Rect(innerRect.x, innerRect.y, innerRect.width, 20f), "Value & Weight Preview");
-
             // 获取当前类别的装备列表
             List<GearItem> gearItems = GetCurrentCategoryGear(kindData);
 
             if (gearItems.Any())
             {
-                // 计算价值和权重统计
+                // 计算平均市场价值
                 float totalValue = 0f;
-                float totalWeight = 0f;
                 int validItems = 0;
 
                 foreach (var gearItem in gearItems)
@@ -1733,7 +2337,6 @@ namespace FactionGearCustomizer
                     if (thingDef != null)
                     {
                         totalValue += thingDef.BaseMarketValue;
-                        totalWeight += gearItem.weight;
                         validItems++;
                     }
                 }
@@ -1741,27 +2344,17 @@ namespace FactionGearCustomizer
                 if (validItems > 0)
                 {
                     float avgValue = totalValue / validItems;
-                    float avgWeight = totalWeight / validItems;
-                    float totalValuePerWeight = totalValue / totalWeight;
-
-                    // 绘制统计信息
-                    float y = innerRect.y + 24f;
-                    float lineHeight = 16f;
-
-                    Widgets.Label(new Rect(innerRect.x, y, innerRect.width, lineHeight), $"Total Value: {totalValue:F0} silver");
-                    y += lineHeight;
-                    Widgets.Label(new Rect(innerRect.x, y, innerRect.width, lineHeight), $"Average Value: {avgValue:F0} silver");
-                    y += lineHeight;
-                    Widgets.Label(new Rect(innerRect.x, y, innerRect.width, lineHeight), $"Total Weight: {totalWeight:F2}");
-                    y += lineHeight;
-                    Widgets.Label(new Rect(innerRect.x, y, innerRect.width, lineHeight), $"Average Weight: {avgWeight:F2}");
-                    y += lineHeight;
-                    Widgets.Label(new Rect(innerRect.x, y, innerRect.width, lineHeight), $"Value per Weight: {totalValuePerWeight:F2} silver/weight");
+                    Widgets.Label(new Rect(innerRect.x, innerRect.y, innerRect.width, 20f), $"Average Market Value: {avgValue:F0} silver");
+                }
+                else
+                {
+                    // 当所有装备的ThingDef都为null时，显示无有效项目
+                    Widgets.Label(new Rect(innerRect.x, innerRect.y, innerRect.width, 20f), "No valid items in this category");
                 }
             }
             else
             {
-                Widgets.Label(new Rect(innerRect.x, innerRect.y + 24f, innerRect.width, 20f), "No items in this category");
+                Widgets.Label(new Rect(innerRect.x, innerRect.y, innerRect.width, 20f), "No items in this category");
             }
         }
 
@@ -1769,9 +2362,9 @@ namespace FactionGearCustomizer
         {
             switch (category)
             {
-                case GearCategory.Weapons: return "Weapons";
+                case GearCategory.Weapons: return "Ranged";
                 case GearCategory.MeleeWeapons: return "Melee";
-                case GearCategory.Armors: return "装甲衣物";
+                case GearCategory.Armors: return "Armors";
                 case GearCategory.Apparel: return "Apparel";
                 case GearCategory.Accessories: return "Accessories";
                 default: return "Unknown";
