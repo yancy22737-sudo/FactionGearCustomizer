@@ -1583,7 +1583,7 @@ namespace FactionGearCustomizer
                     // 添加基本装甲
                     if (!kindData.armors.Any())
                     {
-                        var armors = DefDatabase<ThingDef>.AllDefs.Where(t => t.IsApparel && t.apparel.bodyPartGroups.Contains(BodyPartGroupDefOf.Torso)).Take(2).ToList();
+                        var armors = FactionGearManager.GetAllArmors().Take(2).ToList();
                         foreach (var armor in armors)
                         {
                             kindData.armors.Add(new GearItem(armor.defName));
@@ -1593,8 +1593,7 @@ namespace FactionGearCustomizer
                     // 添加基本衣物
                     if (!kindData.apparel.Any())
                     {
-                        var apparels = DefDatabase<ThingDef>.AllDefs.Where(t => t.IsApparel && !t.apparel.bodyPartGroups.Contains(BodyPartGroupDefOf.Torso) &&
-                            (t.apparel.layers.Contains(ApparelLayerDefOf.OnSkin) || t.apparel.layers.Contains(ApparelLayerDefOf.Middle))).Take(2).ToList();
+                        var apparels = FactionGearManager.GetAllApparel().Take(2).ToList();
                         foreach (var apparel in apparels)
                         {
                             kindData.apparel.Add(new GearItem(apparel.defName));
@@ -1604,7 +1603,7 @@ namespace FactionGearCustomizer
                     // 添加基本饰品
                     if (!kindData.accessories.Any())
                     {
-                        var accessories = DefDatabase<ThingDef>.AllDefs.Where(t => t.IsApparel && t.apparel.layers.Contains(ApparelLayerDefOf.Belt)).Take(1).ToList();
+                        var accessories = FactionGearManager.GetAllAccessories().Take(1).ToList();
                         foreach (var accessory in accessories)
                         {
                             kindData.accessories.Add(new GearItem(accessory.defName));
