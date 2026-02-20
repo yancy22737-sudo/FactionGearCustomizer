@@ -358,9 +358,10 @@ namespace FactionGearCustomizer
         static TexCache()
         {
             // 提前加载并缓存贴图，避免在UI循环中实时读取硬盘
+            // 尝试加载图标，如果失败则使用 null 安全处理
             CopyTex = TryLoadTexture("UI/Buttons/Copy");
             PasteTex = TryLoadTexture("UI/Buttons/Paste");
-            ApplyTex = TryLoadTexture("UI/Buttons/Apply");
+            ApplyTex = TryLoadTexture("UI/Buttons/Confirm"); // 使用 Confirm 代替 Apply，这个更可能存在
         }
 
         private static Texture2D TryLoadTexture(string path)
@@ -912,6 +913,13 @@ namespace FactionGearCustomizer
                 // [修复] 彻底抛弃 tempSettings，直接保存当前状态
                 FactionGearCustomizerMod.Settings.Write();
                 Messages.Message("Settings saved successfully!", MessageTypeDefOf.PositiveEvent);
+
+                // [新功能] 如果用户没有任何预设，自动弹出预设管理器并给出强烈建议
+                if (FactionGearCustomizerMod.Settings.presets.Count == 0)
+                {
+                    showPresetManager = true;
+                    Messages.Message("Tip: Please create a preset to safely back up your hard work!", MessageTypeDefOf.NeutralEvent);
+                }
             }
 
             if (buttonRow.ButtonText("Presets"))
@@ -1355,161 +1363,95 @@ namespace FactionGearCustomizer
             Widgets.DrawMenuSection(rect); // 环世界官方暗色背景板
             Rect innerRect = rect.ContractedBy(5f);
 
-            // 调整上下两部分的间距
-            Rect factionRect = new Rect(innerRect.x, innerRect.y, innerRect.width, (innerRect.height / 2f) - 10f);
-            Rect kindRect = new Rect(innerRect.x, factionRect.yMax + 15f, innerRect.width, (innerRect.height / 2f) - 10f);
-
-            // -- 派系列表 --
-            // 放大标题字体，增加标题高度
+            // 1. 绘制派系列表（使用紧凑的原版风格）
             Text.Font = GameFont.Medium;
             Text.Anchor = TextAnchor.MiddleLeft;
-            Widgets.Label(new Rect(factionRect.x, factionRect.y, factionRect.width, 30f), "Factions");
+            Widgets.Label(new Rect(innerRect.x, innerRect.y, innerRect.width, 30f), "Factions");
             Text.Font = GameFont.Small;
             Text.Anchor = TextAnchor.UpperLeft;
             
-            // 增加标题与列表之间的间距
-            Rect factionListOutRect = new Rect(factionRect.x, factionRect.y + 35f, factionRect.width, factionRect.height - 35f);
+            // 派系列表占60%高度
+            float factionListHeight = innerRect.height * 0.6f;
+            Rect factionListOutRect = new Rect(innerRect.x, innerRect.y + 35f, innerRect.width, factionListHeight - 35f);
 
-            var allFactions = DefDatabase<FactionDef>.AllDefs.OrderBy(f => f.LabelCap.ToString()).ToList();
-            // 增加列表项高度，加大间距
-            Rect factionListViewRect = new Rect(0, 0, factionListOutRect.width - 16f, allFactions.Count * 30f);
+            // ================= 派系列表绘制 =================
+            // 【修复 1】安全排序：防止因某些隐藏派系没有 label 导致报错
+            var allFactions = DefDatabase<FactionDef>.AllDefs
+                .OrderBy(f => f.label != null ? f.LabelCap.ToString() : f.defName)
+                .ToList();
 
+            Rect factionListViewRect = new Rect(0, 0, factionListOutRect.width - 16f, allFactions.Count * 32f);
             Widgets.BeginScrollView(factionListOutRect, ref factionListScrollPos, factionListViewRect);
-            Listing_Standard factionListing = new Listing_Standard();
-            factionListing.Begin(factionListViewRect);
+            float y = 0;
             foreach (var factionDef in allFactions)
             {
-                // 增加列表项高度
-                Rect rowRect = factionListing.GetRect(28f);
+                Rect rowRect = new Rect(0, y, factionListViewRect.width, 32f);
 
-                // 悬停与选中特效
                 if (selectedFactionDefName == factionDef.defName)
                     Widgets.DrawHighlightSelected(rowRect);
                 else if (Mouse.IsOver(rowRect))
                     Widgets.DrawHighlight(rowRect);
 
-                // 检查该派系是否被修改过
-                bool isModified = false;
-                var factionData = FactionGearCustomizerMod.Settings.GetOrCreateFactionData(factionDef.defName);
-                if (factionData.kindGearData.Any(k => k.isModified))
+                // 【修复】抛弃反射，并增加 try-catch 防止某些Mod的坏图导致报错
+                Texture2D factionIcon = null;
+                try { factionIcon = factionDef.FactionIcon; } catch { }
+                
+                if (factionIcon != null)
                 {
-                    isModified = true;
+                    Widgets.DrawTextureFitted(new Rect(rowRect.x + 6f, rowRect.y + 4f, 24f, 24f), factionIcon, 1f);
                 }
 
-                // 绘制派系名称
-                Rect labelRect = new Rect(rowRect.x, rowRect.y, rowRect.width - 20f, rowRect.height);
-                string factionBaseName = factionDef.LabelCap;
-                string statusText = "";
-                Color statusColor = Color.white;
+                // 【需求更新】去除原版长篇介绍，改为分两行显示 "中文名称" 和 "存档代码(defName)"
+                Rect infoRect = new Rect(rowRect.x + 36f, rowRect.y, rowRect.width - 120f, rowRect.height);
+                string factionLabel = factionDef.label != null ? factionDef.LabelCap.ToString() : factionDef.defName;
                 
-                // 检测是否载入游戏
-                bool isGameLoaded = Current.ProgramState == ProgramState.Playing || Find.World != null;
-                
-                // 如果已载入游戏，尝试获取存档中的派系信息和状态
-                if (isGameLoaded && Find.World != null && Find.FactionManager != null)
+                Text.Anchor = TextAnchor.MiddleLeft;
+                // 使用富文本将 defName 显示为灰色，方便排查和对应存档
+                Widgets.Label(infoRect, $"{factionLabel}\n<color=#aaaaaa>ID: {factionDef.defName}</color>");
+                Text.Anchor = TextAnchor.UpperLeft;
+
+                // 信息按钮
+                Rect infoButtonRect = new Rect(rowRect.x + rowRect.width - 100f, rowRect.y + 8f, 16f, 16f);
+                if (Widgets.ButtonInvisible(infoButtonRect))
                 {
-                    // 查找存档中的对应派系
+                    Find.WindowStack.Add(new Dialog_InfoCard(factionDef));
+                }
+                Widgets.Label(infoButtonRect, "i");
+
+                // 【修复 4】严格限制好感度的获取时机，仅在真正游玩 (Playing) 时获取
+                Rect statusRect = new Rect(rowRect.x + rowRect.width - 80f, rowRect.y, 80f, rowRect.height);
+                string statusText = "Neutral";
+                Color statusColor = Color.cyan;
+
+                if (Current.ProgramState == ProgramState.Playing && Find.FactionManager != null)
+                {
                     var worldFaction = Find.FactionManager.AllFactions.FirstOrDefault(f => f.def == factionDef);
-                    if (worldFaction != null)
+                    if (worldFaction != null && Faction.OfPlayer != null && worldFaction != Faction.OfPlayer)
                     {
-                        // 获取玩家派系
-                        var playerFaction = Faction.OfPlayer;
-                        if (playerFaction != null && worldFaction != playerFaction)
+                        try
                         {
-                            try
-                            {
-                                // 获取好感度
-                                float goodwill = worldFaction.PlayerGoodwill;
-                                string status = "中立";
-                                
-                                // 根据好感度确定状态
-                                if (goodwill > 75f)
-                                {
-                                    status = "盟友";
-                                    statusColor = new Color(0.3f, 1f, 0.3f); // 绿色
-                                }
-                                else if (goodwill > -75f)
-                                {
-                                    status = "中立";
-                                    statusColor = Color.white; // 白色
-                                }
-                                else
-                                {
-                                    status = "敌对";
-                                    statusColor = new Color(1f, 0.3f, 0.3f); // 红色
-                                }
-                                
-                                // 添加括号内的派系名称和状态
-                                statusText = $" ({worldFaction.Name} {status})";
-                            }
-                            catch (Exception)
-                            {
-                                // 捕获可能的异常，例如尝试获取派系与自身的关系
-                                // 只添加派系名称
-                                statusText = $" ({worldFaction.Name})";
-                            }
+                            float goodwill = worldFaction.PlayerGoodwill;
+                            if (goodwill > 75f) { statusText = "Allied"; statusColor = Color.green; }
+                            else if (goodwill > 0f) { statusText = "Friendly"; statusColor = new Color(0.4f, 1f, 0.4f); }
+                            else if (goodwill > -75f) { statusText = "Neutral"; statusColor = Color.cyan; }
+                            else { statusText = "Hostile"; statusColor = Color.red; }
                         }
-                        else
-                        {
-                            // 无法获取状态，只添加派系名称
-                            statusText = $" ({worldFaction.Name})";
-                        }
+                        catch { /* 忽略任何突发的底层计算异常 */ }
                     }
                 }
-                
-                // 保存原始颜色
-                Color originalColor = GUI.color;
-                
-                // 计算文字位置
-                float xPos = labelRect.x;
-                float lineHeight = Text.CalcSize("A").y;
-                
-                // 禁用文字换行
-                Text.WordWrap = false;
-                
-                // 为修改过的派系添加视觉标记并设置颜色
-                if (isModified)
-                {
-                    // 绘制星号
-                    GUI.color = Color.yellow;
-                    Text.Anchor = TextAnchor.MiddleLeft;
-                    Text.Font = GameFont.Tiny;
-                    float asteriskWidth = Text.CalcSize("*").x;
-                    Widgets.Label(new Rect(xPos, labelRect.y, asteriskWidth, labelRect.height), "*");
-                    xPos += asteriskWidth;
-                    
-                    // 绘制派系名称（黄色）
-                    GUI.color = Color.yellow;
-                    float nameWidth = Text.CalcSize(factionBaseName).x;
-                    Widgets.Label(new Rect(xPos, labelRect.y, nameWidth, labelRect.height), factionBaseName);
-                    xPos += nameWidth;
-                }
-                else
-                {
-                    // 绘制派系名称（正常颜色）
-                    GUI.color = statusColor;
-                    float nameWidth = Text.CalcSize(factionBaseName).x;
-                    Widgets.Label(new Rect(xPos, labelRect.y, nameWidth, labelRect.height), factionBaseName);
-                    xPos += nameWidth;
-                }
-                
-                // 绘制状态文本（使用状态颜色）
-                GUI.color = statusColor;
-                Widgets.Label(new Rect(xPos, labelRect.y, labelRect.width - (xPos - labelRect.x), labelRect.height), statusText);
-                
-                // 恢复设置
-                Text.WordWrap = true;
-                Text.Font = GameFont.Small;
-                Text.Anchor = TextAnchor.UpperLeft;
-                GUI.color = originalColor;
 
-                // 点击派系名称时设置为当前选中派系
-                if (Widgets.ButtonInvisible(new Rect(rowRect.x + 25f, rowRect.y, rowRect.width - 25f - 100f, rowRect.height)))
+                GUI.color = statusColor;
+                Text.Anchor = TextAnchor.MiddleRight;
+                Widgets.Label(statusRect, statusText);
+                Text.Anchor = TextAnchor.UpperLeft;
+                GUI.color = Color.white;
+
+                // 点击选择派系
+                if (Widgets.ButtonInvisible(rowRect))
                 {
                     selectedFactionDefName = factionDef.defName;
                     selectedKindDefName = "";
-                    
-                    // 选择该派系的第一个兵种
+
                     if (factionDef.pawnGroupMakers != null)
                     {
                         foreach (var pawnGroupMaker in factionDef.pawnGroupMakers)
@@ -1525,27 +1467,56 @@ namespace FactionGearCustomizer
                             }
                         }
                     }
-                    
-                    // 重置滚动位置，确保列表更新后正确显示
                     kindListScrollPos = Vector2.zero;
                     gearListScrollPos = Vector2.zero;
                 }
-                // 增加列表项之间的间距
-                factionListing.Gap(4f);
+                y += 32f;
             }
-            factionListing.End();
             Widgets.EndScrollView();
 
-            // -- 兵种列表 --
-            // 放大标题字体，增加标题高度
+            // ================= 兵种列表绘制 =================
+            float kindListY = innerRect.y + factionListHeight + 10f;
+            float kindListHeight = innerRect.height - factionListHeight - 10f;
+            
             Text.Font = GameFont.Medium;
             Text.Anchor = TextAnchor.MiddleLeft;
-            Widgets.Label(new Rect(kindRect.x, kindRect.y, kindRect.width, 30f), "Kind Defs");
+            Widgets.Label(new Rect(innerRect.x, kindListY, 150f, 30f), "Kind Defs");
             Text.Font = GameFont.Small;
             Text.Anchor = TextAnchor.UpperLeft;
+
+            // 【修复】恢复使用 TexCache 中的图标，但添加安全检查
+            Rect btnRect = new Rect(innerRect.xMax - 75f, kindListY + 5f, 20f, 20f);
             
-            // 增加标题与列表之间的间距
-            Rect kindListOutRect = new Rect(kindRect.x, kindRect.y + 35f, kindRect.width, kindRect.height - 35f);
+            // 使用复制图标，添加安全检查
+            Texture2D copyTex = TexCache.CopyTex ?? Widgets.CheckboxOnTex;
+            if (Widgets.ButtonImage(btnRect, copyTex))
+            {
+                CopyKindDefGear();
+                Messages.Message("Copied KindDef gear!", MessageTypeDefOf.TaskCompletion, false);
+            }
+            TooltipHandler.TipRegion(btnRect, "Copy selected KindDef's gear");
+
+            btnRect.x += 25f;
+            // 使用粘贴图标，添加安全检查
+            Texture2D pasteTex = TexCache.PasteTex ?? Widgets.CheckboxOnTex;
+            if (Widgets.ButtonImage(btnRect, pasteTex))
+            {
+                PasteKindDefGear();
+                Messages.Message("Pasted gear to KindDef!", MessageTypeDefOf.TaskCompletion, false);
+            }
+            TooltipHandler.TipRegion(btnRect, "Paste gear to selected KindDef");
+
+            btnRect.x += 25f;
+            // 使用应用图标，添加安全检查
+            Texture2D applyTex = TexCache.ApplyTex ?? Widgets.CheckboxOnTex;
+            if (Widgets.ButtonImage(btnRect, applyTex))
+            {
+                ApplyToAllKindsInFaction();
+                Messages.Message("Applied to ALL KindDefs in Faction!", MessageTypeDefOf.TaskCompletion, false);
+            }
+            TooltipHandler.TipRegion(btnRect, "Apply copied gear to ALL KindDefs in this Faction");
+
+            Rect kindListOutRect = new Rect(innerRect.x, kindListY + 35f, innerRect.width, kindListHeight - 35f);
 
             List<PawnKindDef> kindDefsToDraw = new List<PawnKindDef>();
             if (!string.IsNullOrEmpty(selectedFactionDefName))
@@ -1553,7 +1524,6 @@ namespace FactionGearCustomizer
                 var factionDef = DefDatabase<FactionDef>.GetNamedSilentFail(selectedFactionDefName);
                 if (factionDef != null && factionDef.pawnGroupMakers != null)
                 {
-                    // 清空列表，确保每次选择派系时重新生成
                     kindDefsToDraw.Clear();
                     foreach (var pawnGroupMaker in factionDef.pawnGroupMakers)
                     {
@@ -1570,62 +1540,121 @@ namespace FactionGearCustomizer
             }
             else
             {
-                // 如果没有选择派系，显示所有兵种
-                kindDefsToDraw = DefDatabase<PawnKindDef>.AllDefs.OrderBy(k => k.LabelCap.ToString()).ToList();
+                // 【修复 5】同样防止兵种列表因为 null label 崩溃
+                kindDefsToDraw = DefDatabase<PawnKindDef>.AllDefs
+                    .OrderBy(k => k.label != null ? k.LabelCap.ToString() : k.defName)
+                    .ToList();
             }
 
-            // 增加列表项高度，加大间距
-            Rect kindListViewRect = new Rect(0, 0, kindListOutRect.width - 16f, kindDefsToDraw.Count * 35f);
+            Rect kindListViewRect = new Rect(0, 0, kindListOutRect.width - 16f, kindDefsToDraw.Count * 32f);
             Widgets.BeginScrollView(kindListOutRect, ref kindListScrollPos, kindListViewRect);
-            Listing_Standard kindListing = new Listing_Standard();
-            kindListing.Begin(kindListViewRect);
-            foreach (var kindDef in kindDefsToDraw.OrderBy(k => k.LabelCap.ToString()))
+            float kindY = 0;
+            
+            // 【修复 5.1】应用安全排序
+            var sortedKindDefs = kindDefsToDraw.OrderBy(k => k.label != null ? k.LabelCap.ToString() : k.defName);
+            
+            foreach (var kindDef in sortedKindDefs)
             {
-                // 增加列表项高度
-                Rect rowRect = kindListing.GetRect(28f);
-
+                Rect rowRect = new Rect(0, kindY, kindListViewRect.width, 32f);
                 if (selectedKindDefName == kindDef.defName)
                     Widgets.DrawHighlightSelected(rowRect);
                 else if (Mouse.IsOver(rowRect))
                     Widgets.DrawHighlight(rowRect);
 
-                // 检查该兵种是否被修改过
                 bool isModified = false;
                 if (!string.IsNullOrEmpty(selectedFactionDefName))
                 {
-                    var factionData = FactionGearCustomizerMod.Settings.GetOrCreateFactionData(selectedFactionDefName);
-                    var kindData = factionData.GetKindData(kindDef.defName);
-                    if (kindData != null)
+                    var factionData = FactionGearCustomizerMod.Settings.factionGearData.FirstOrDefault(f => f.factionDefName == selectedFactionDefName);
+                    if (factionData != null)
                     {
-                        isModified = kindData.isModified;
+                        var kindData = factionData.kindGearData.FirstOrDefault(k => k.kindDefName == kindDef.defName);
+                        if (kindData != null)
+                        {
+                            isModified = kindData.isModified;
+                        }
                     }
                 }
 
-                // 绘制兵种名称
-                Rect labelRect = new Rect(rowRect.x, rowRect.y, rowRect.width - 20f, rowRect.height);
-                string labelText = kindDef.LabelCap;
+                Rect labelRect = new Rect(rowRect.x + 6f, rowRect.y, rowRect.width - 20f, rowRect.height);
                 
-                // 为修改过的兵种添加视觉标记
+                string labelText = kindDef.label != null ? kindDef.LabelCap.ToString() : kindDef.defName;
+                
+                // 绘制兵种名称
                 if (isModified)
                 {
-                    labelText = $"*{labelText}*";
-                    Text.Anchor = TextAnchor.MiddleLeft;
-                    Text.Font = GameFont.Tiny;
                     GUI.color = Color.yellow;
-                    Widgets.Label(labelRect, labelText);
+                    Widgets.Label(new Rect(labelRect.x, labelRect.y + 6f, labelRect.width - 60f, 20f), labelText);
+                    
+                    // 显示修改标记
+                    Texture2D modTex = TexCache.ApplyTex ?? Widgets.CheckboxOnTex;
+                    Widgets.DrawTextureFitted(new Rect(labelRect.x - 20f, labelRect.y + 8f, 16f, 16f), modTex, 0.8f);
+                    
                     GUI.color = Color.white;
-                    Text.Font = GameFont.Small;
-                    Text.Anchor = TextAnchor.UpperLeft;
                 }
                 else
                 {
-                    Text.Anchor = TextAnchor.MiddleLeft;
-                    Widgets.Label(labelRect, labelText);
-                    Text.Anchor = TextAnchor.UpperLeft;
+                    Widgets.Label(new Rect(labelRect.x, labelRect.y + 6f, labelRect.width - 60f, 20f), labelText);
                 }
 
+                // 为每个 kinddef 添加复制粘贴和应用按钮
+                float btnX = labelRect.x + labelRect.width - 60f;
+                float btnY = labelRect.y + 6f;
+                float btnSize = 18f;
+                float btnSpacing = 5f;
+
+                // 复制按钮
+                Texture2D kindCopyTex = TexCache.CopyTex ?? Widgets.CheckboxOnTex;
+                Rect copyBtnRect = new Rect(btnX, btnY, btnSize, btnSize);
+                if (Widgets.ButtonImage(copyBtnRect, kindCopyTex))
+                {
+                    // 复制当前兵种的装备
+                    if (!string.IsNullOrEmpty(selectedFactionDefName) && !string.IsNullOrEmpty(kindDef.defName))
+                    {
+                        var factionData = FactionGearCustomizerMod.Settings.GetOrCreateFactionData(selectedFactionDefName);
+                        var kindData = factionData.GetOrCreateKindData(kindDef.defName);
+                        // 复制到剪贴板
+                        copiedKindGearData = new KindGearData(kindDef.defName)
+                        {
+                            isModified = kindData.isModified,
+                            weapons = kindData.weapons.Select(g => new GearItem(g.thingDefName, g.weight)).ToList(),
+                            meleeWeapons = kindData.meleeWeapons.Select(g => new GearItem(g.thingDefName, g.weight)).ToList(),
+                            armors = kindData.armors.Select(g => new GearItem(g.thingDefName, g.weight)).ToList(),
+                            apparel = kindData.apparel.Select(g => new GearItem(g.thingDefName, g.weight)).ToList(),
+                            others = kindData.others.Select(g => new GearItem(g.thingDefName, g.weight)).ToList()
+                        };
+                        Messages.Message("Copied gear from " + labelText, MessageTypeDefOf.TaskCompletion, false);
+                    }
+                }
+                TooltipHandler.TipRegion(copyBtnRect, "Copy this KindDef's gear");
+
+                // 粘贴按钮
+                btnX += btnSize + btnSpacing;
+                Texture2D kindPasteTex = TexCache.PasteTex ?? Widgets.CheckboxOnTex;
+                Rect pasteBtnRect = new Rect(btnX, btnY, btnSize, btnSize);
+                if (Widgets.ButtonImage(pasteBtnRect, kindPasteTex))
+                {
+                    // 粘贴装备到当前兵种
+                    if (!string.IsNullOrEmpty(selectedFactionDefName) && !string.IsNullOrEmpty(kindDef.defName) && copiedKindGearData != null)
+                    {
+                        var factionData = FactionGearCustomizerMod.Settings.GetOrCreateFactionData(selectedFactionDefName);
+                        var targetKindData = factionData.GetOrCreateKindData(kindDef.defName);
+                        
+                        // 复制装备数据
+                        targetKindData.isModified = true;
+                        targetKindData.weapons = copiedKindGearData.weapons.Select(g => new GearItem(g.thingDefName, g.weight)).ToList();
+                        targetKindData.meleeWeapons = copiedKindGearData.meleeWeapons.Select(g => new GearItem(g.thingDefName, g.weight)).ToList();
+                        targetKindData.armors = copiedKindGearData.armors.Select(g => new GearItem(g.thingDefName, g.weight)).ToList();
+                        targetKindData.apparel = copiedKindGearData.apparel.Select(g => new GearItem(g.thingDefName, g.weight)).ToList();
+                        targetKindData.others = copiedKindGearData.others.Select(g => new GearItem(g.thingDefName, g.weight)).ToList();
+                        
+                        FactionGearCustomizerMod.Settings.Write();
+                        Messages.Message("Pasted gear to " + labelText, MessageTypeDefOf.TaskCompletion, false);
+                    }
+                }
+                TooltipHandler.TipRegion(pasteBtnRect, "Paste gear to this KindDef");
+
                 // 点击兵种名称时设置为当前选中兵种
-                if (Widgets.ButtonInvisible(new Rect(rowRect.x + 25f, rowRect.y, rowRect.width - 25f - 140f, rowRect.height)))
+                if (Widgets.ButtonInvisible(rowRect))
                 {
                     selectedKindDefName = kindDef.defName;
                     // 重置滚动位置，确保物品列表更新后正确显示
@@ -1643,148 +1672,8 @@ namespace FactionGearCustomizer
                     }
                 }
                 
-                // 添加Copy图标
-                Rect copyIconRect = new Rect(rowRect.xMax - 100f, rowRect.y + 4f, 20f, 20f);
-                if (Widgets.ButtonInvisible(copyIconRect))
-                {
-                    var factionData = FactionGearCustomizerMod.Settings.GetOrCreateFactionData(selectedFactionDefName);
-                    var kindData = factionData.GetOrCreateKindData(kindDef.defName);
-                    CopyKindDefGear();
-                }
-                // 绘制复制图标（使用try-catch避免ContentFinder错误）
-                if (Widgets.ButtonInvisible(copyIconRect))
-                {
-                    var factionData = FactionGearCustomizerMod.Settings.GetOrCreateFactionData(selectedFactionDefName);
-                    var kindData = factionData.GetOrCreateKindData(kindDef.defName);
-                    CopyKindDefGear();
-                }
-                try
-                {
-                    // 使用缓存的贴图，避免实时读取硬盘
-                    if (TexCache.CopyTex != null)
-                    {
-                        Widgets.DrawTextureFitted(copyIconRect, TexCache.CopyTex, 1f);
-                    }
-                    else
-                    {
-                        Widgets.Label(copyIconRect, "C");
-                    }
-                }
-                catch (Exception e)
-                {
-                    // 出错时显示替代标签
-                    Widgets.Label(copyIconRect, "C");
-                }
-                
-                // 常驻显示Paste图标
-                Rect pasteIconRect = new Rect(rowRect.xMax - 70f, rowRect.y + 4f, 20f, 20f);
-                try
-                {
-                    if (copiedKindGearData != null)
-                    {
-                        if (Widgets.ButtonInvisible(pasteIconRect))
-                        {
-                            var factionData = FactionGearCustomizerMod.Settings.GetOrCreateFactionData(selectedFactionDefName);
-                            var kindData = factionData.GetOrCreateKindData(kindDef.defName);
-                            PasteKindDefGear();
-                            // 确保设置修改标记
-                            kindData.isModified = true;
-                        }
-                        // 使用缓存的贴图，避免实时读取硬盘
-                        if (TexCache.PasteTex != null)
-                        {
-                            Widgets.DrawTextureFitted(pasteIconRect, TexCache.PasteTex, 1f);
-                        }
-                        else
-                        {
-                            Widgets.Label(pasteIconRect, "P");
-                        }
-                    }
-                    else
-                    {
-                        // 当没有复制数据时，显示灰色的粘贴图标
-                        GUI.color = Color.grey;
-                        // 使用缓存的贴图，避免实时读取硬盘
-                        if (TexCache.PasteTex != null)
-                        {
-                            Widgets.DrawTextureFitted(pasteIconRect, TexCache.PasteTex, 1f);
-                        }
-                        else
-                        {
-                            Widgets.Label(pasteIconRect, "P");
-                        }
-                        GUI.color = Color.white;
-                    }
-                }
-                catch (Exception e)
-                {
-                    // 出错时显示替代标签
-                    if (copiedKindGearData != null)
-                    {
-                        Widgets.Label(pasteIconRect, "P");
-                    }
-                    else
-                    {
-                        GUI.color = Color.grey;
-                        Widgets.Label(pasteIconRect, "P");
-                        GUI.color = Color.white;
-                    }
-                }
-                
-                // 添加应用到本faction其他所有kind的图标
-                Rect applyAllIconRect = new Rect(rowRect.xMax - 40f, rowRect.y + 4f, 20f, 20f);
-                try
-                {
-                    if (copiedKindGearData != null)
-                    {
-                        if (Widgets.ButtonInvisible(applyAllIconRect))
-                        {
-                            ApplyToAllKindsInFaction();
-                        }
-                        // 使用缓存的贴图，避免实时读取硬盘
-                        if (TexCache.ApplyTex != null)
-                        {
-                            Widgets.DrawTextureFitted(applyAllIconRect, TexCache.ApplyTex, 1f);
-                        }
-                        else
-                        {
-                            Widgets.Label(applyAllIconRect, "A");
-                        }
-                    }
-                    else
-                    {
-                        // 当没有复制数据时，显示灰色的应用图标
-                        GUI.color = Color.grey;
-                        // 使用缓存的贴图，避免实时读取硬盘
-                        if (TexCache.ApplyTex != null)
-                        {
-                            Widgets.DrawTextureFitted(applyAllIconRect, TexCache.ApplyTex, 1f);
-                        }
-                        else
-                        {
-                            Widgets.Label(applyAllIconRect, "A");
-                        }
-                        GUI.color = Color.white;
-                    }
-                }
-                catch (Exception e)
-                {
-                    // 出错时显示替代标签
-                    if (copiedKindGearData != null)
-                    {
-                        Widgets.Label(applyAllIconRect, "A");
-                    }
-                    else
-                    {
-                        GUI.color = Color.grey;
-                        Widgets.Label(applyAllIconRect, "A");
-                        GUI.color = Color.white;
-                    }
-                }
-                // 增加列表项之间的间距
-                kindListing.Gap(6f);
+                kindY += 32f;
             }
-            kindListing.End();
             Widgets.EndScrollView();
         }
 
@@ -3292,10 +3181,16 @@ namespace FactionGearCustomizer
                 lines.Add("Weapon Info:");
                 lines.Add($"Range: {FactionGearManager.GetWeaponRange(thingDef):F1} tiles");
                 lines.Add($"Damage: {FactionGearManager.GetWeaponDamage(thingDef):F1} damage");
+                
+                // 【绝杀修复】去除错误的 verb.accuracyTouch 调用，使用官方 StatDef 方法获取
+                lines.Add($"Accuracy (Touch): {thingDef.GetStatValueAbstract(StatDefOf.AccuracyTouch):P0}");
+                lines.Add($"Accuracy (Short): {thingDef.GetStatValueAbstract(StatDefOf.AccuracyShort):P0}");
+                lines.Add($"Accuracy (Medium): {thingDef.GetStatValueAbstract(StatDefOf.AccuracyMedium):P0}");
+                lines.Add($"Accuracy (Long): {thingDef.GetStatValueAbstract(StatDefOf.AccuracyLong):P0}");
+
                 if (thingDef.Verbs != null && thingDef.Verbs.Count > 0)
                 {
                     var verb = thingDef.Verbs[0];
-                    lines.Add($"Accuracy: {verb.accuracyTouch:F2}, {verb.accuracyShort:F2}, {verb.accuracyMedium:F2}, {verb.accuracyLong:F2}");
                     if (verb.defaultProjectile != null)
                     {
                         lines.Add($"Projectile: {verb.defaultProjectile.LabelCap}");
