@@ -1,216 +1,199 @@
-你在修改派系 UI 时引发的“狂报错”（通常伴随着 UI 错位、界面重叠、或者控制台无限刷新红色错误），是因为你的代码踩到了 Unity IMGUI 和环世界底层 API 的 **三个致命雷区**。
+1. 增加派系优先级排序 & 删去左侧繁杂图标
+首先，在 FactionGearEditor 类的顶部（也就是声明变量 private static string searchText = ""; 的附近），加上这个控制展开状态的变量：
 
-这不仅仅是逻辑问题，而是会导致整个 UI 渲染管线崩溃（GUI Cascade Failure）的严重缺陷。以下是问题根源及完美修复方案：
+C#
+        // 用于记录当前展开权重的物品
+        private static GearItem expandedGearItem = null;
+然后，在 FactionGearEditor 类中新增一个派系优先级判断方法：
 
-### 🚨 狂报错的三大元凶：
+C#
+        // 派系排序优先级（数字越小越靠前）
+        private static int GetFactionPriority(FactionDef f)
+        {
+            if (f == null) return 100;
+            string name = f.defName.ToLower();
+            if (name.Contains("player")) return 1;
+            if (name.Contains("empire")) return 2;
+            if (name.Contains("outlander")) return 3;
+            if (name.Contains("tribe")) return 4;
+            if (name.Contains("pirate")) return 5;
+            if (name.Contains("mechanoid") || name.Contains("insect")) return 10;
+            return 6; // 其他 Mod 派系
+        }
+接下来，找到 DrawLeftPanel 方法，进行以下两处替换：
+将派系列表排序代码（var allFactions = ...）替换为：
 
-1. **向 GUI.Label 传入了 Null（致命崩溃）**：
-在环世界中，有些隐藏派系（如机械族、虫族或一些 Mod 派系）和内部兵种是没有 `label` 属性的。当你调用 `factionDef.LabelCap` 或 `kindDef.LabelCap` 时，它会返回 `null`。**Unity 的 `Widgets.Label` 一旦接收到 `null`，就会立刻抛出异常！** 这会打断 `EndScrollView` 的执行，导致后续所有 UI 排版彻底崩溃，产生无限报错。
-2. **在 OnGUI 中使用反射（严重卡顿 / GC 爆炸）**：
-你在获取派系图标时写了 `factionDef.GetType().GetProperty("uiIcon")`，并且放在了 `foreach` 循环里。这意味着**游戏每秒会执行 60 次 × 几十个派系 = 数千次的反射调用！** 这种写法会瞬间榨干内存，导致极度卡顿。其实获取图标官方是有标准 API 的。
-3. **在未进入游戏时强行读取好感度**：
-你用 `Find.World != null` 来判断游戏是否载入，但在生成世界（World Gen）的过场中，`Find.World` 是有值的，但 `Faction.OfPlayer`（玩家派系）还没生成。此时调用 `worldFaction.PlayerGoodwill` 必炸无疑。
-
----
-
-### 🛠️ 终极修复方案
-
-请打开你的代码，找到 `DrawLeftPanel` 方法，将 **绘制派系列表和兵种列表的代码（大约从 到 ）** 完全替换为以下经过安全处理的代码：
-
-```csharp
-            // ================= 派系列表绘制 =================
-            // 【修复 1】安全排序：防止因某些隐藏派系没有 label 导致报错
+C#
+            // 【修复 4】按照常见频率优先级排序
             var allFactions = DefDatabase<FactionDef>.AllDefs
-                .OrderBy(f => f.label != null ? f.LabelCap.ToString() : f.defName)
+                .OrderBy(f => GetFactionPriority(f))
+                .ThenBy(f => f.label != null ? f.LabelCap.ToString() : f.defName)
                 .ToList();
+往下找，将“Kind Defs”标题与周围被删去的图标部分彻底精简，替换为：
 
-            Rect factionListViewRect = new Rect(0, 0, factionListOutRect.width - 16f, allFactions.Count * 32f);
-            Widgets.BeginScrollView(factionListOutRect, ref factionListScrollPos, factionListViewRect);
-            float y = 0;
-            foreach (var factionDef in allFactions)
-            {
-                Rect rowRect = new Rect(0, y, factionListViewRect.width, 32f);
-
-                if (selectedFactionDefName == factionDef.defName)
-                    Widgets.DrawHighlightSelected(rowRect);
-                else if (Mouse.IsOver(rowRect))
-                    Widgets.DrawHighlight(rowRect);
-
-                // 【修复 2】彻底抛弃反射！使用环世界原生 API 获取派系图标
-                Texture2D factionIcon = factionDef.FactionIcon;
-                if (factionIcon != null)
-                {
-                    Widgets.DrawTextureFitted(new Rect(rowRect.x + 6f, rowRect.y + 4f, 24f, 24f), factionIcon, 1f);
-                }
-
-                // 【修复 3】安全获取名称和描述，绝不向 Widgets.Label 传递 null
-                Rect infoRect = new Rect(rowRect.x + 36f, rowRect.y, rowRect.width - 120f, rowRect.height);
-                string factionBaseName = factionDef.label != null ? factionDef.LabelCap.ToString() : factionDef.defName;
-                Widgets.Label(new Rect(infoRect.x, infoRect.y + 2f, infoRect.width, 16f), factionBaseName);
-
-                GUI.color = Color.gray;
-                string factionDescription = "";
-                if (!factionDef.description.NullOrEmpty())
-                {
-                    factionDescription = factionDef.description.Trim();
-                    if (factionDescription.Length > 60)
-                        factionDescription = factionDescription.Substring(0, 60) + "...";
-                }
-                Widgets.Label(new Rect(infoRect.x, infoRect.y + 16f, infoRect.width, 14f), factionDescription);
-                GUI.color = Color.white;
-
-                // 信息按钮
-                Rect infoButtonRect = new Rect(rowRect.x + rowRect.width - 100f, rowRect.y + 8f, 16f, 16f);
-                if (Widgets.ButtonInvisible(infoButtonRect))
-                {
-                    Find.WindowStack.Add(new Dialog_InfoCard(factionDef));
-                }
-                Widgets.Label(infoButtonRect, "i");
-
-                // 【修复 4】严格限制好感度的获取时机，仅在真正游玩 (Playing) 时获取
-                Rect statusRect = new Rect(rowRect.x + rowRect.width - 80f, rowRect.y, 80f, rowRect.height);
-                string statusText = "Neutral";
-                Color statusColor = Color.cyan;
-
-                if (Current.ProgramState == ProgramState.Playing && Find.FactionManager != null)
-                {
-                    var worldFaction = Find.FactionManager.AllFactions.FirstOrDefault(f => f.def == factionDef);
-                    if (worldFaction != null && Faction.OfPlayer != null && worldFaction != Faction.OfPlayer)
-                    {
-                        try
-                        {
-                            float goodwill = worldFaction.PlayerGoodwill;
-                            if (goodwill > 75f) { statusText = "Allied"; statusColor = Color.green; }
-                            else if (goodwill > 0f) { statusText = "Friendly"; statusColor = new Color(0.4f, 1f, 0.4f); }
-                            else if (goodwill > -75f) { statusText = "Neutral"; statusColor = Color.cyan; }
-                            else { statusText = "Hostile"; statusColor = Color.red; }
-                        }
-                        catch { /* 忽略任何突发的底层计算异常 */ }
-                    }
-                }
-
-                GUI.color = statusColor;
-                Text.Anchor = TextAnchor.MiddleRight;
-                Widgets.Label(statusRect, statusText);
-                Text.Anchor = TextAnchor.UpperLeft;
-                GUI.color = Color.white;
-
-                // 点击选择派系
-                if (Widgets.ButtonInvisible(rowRect))
-                {
-                    selectedFactionDefName = factionDef.defName;
-                    selectedKindDefName = "";
-
-                    if (factionDef.pawnGroupMakers != null)
-                    {
-                        foreach (var pawnGroupMaker in factionDef.pawnGroupMakers)
-                        {
-                            if (pawnGroupMaker.options != null && pawnGroupMaker.options.Any())
-                            {
-                                var firstOption = pawnGroupMaker.options.First();
-                                if (firstOption.kind != null)
-                                {
-                                    selectedKindDefName = firstOption.kind.defName;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    kindListScrollPos = Vector2.zero;
-                    gearListScrollPos = Vector2.zero;
-                }
-                y += 32f;
-            }
-            Widgets.EndScrollView();
-
+C#
             // ================= 兵种列表绘制 =================
             float kindListY = innerRect.y + factionListHeight + 10f;
             float kindListHeight = innerRect.height - factionListHeight - 10f;
             
             Text.Font = GameFont.Medium;
             Text.Anchor = TextAnchor.MiddleLeft;
-            Widgets.Label(new Rect(innerRect.x, kindListY, innerRect.width, 30f), "Kind Defs");
+            Widgets.Label(new Rect(innerRect.x, kindListY, 150f, 30f), "Kind Defs");
             Text.Font = GameFont.Small;
             Text.Anchor = TextAnchor.UpperLeft;
+
+            // 【修复 2】删去了此处标题栏右侧的复制、粘贴、应用三个图标
+
             Rect kindListOutRect = new Rect(innerRect.x, kindListY + 35f, innerRect.width, kindListHeight - 35f);
+🛠️ 2. 中间面板：加入 "AA" 按钮 & 动态高度计算
+找到 DrawMiddlePanel 方法，将顶部绘制按钮和滚动列表的部分替换为：
 
-            List<PawnKindDef> kindDefsToDraw = new List<PawnKindDef>();
-            if (!string.IsNullOrEmpty(selectedFactionDefName))
+C#
+            // 【修复 2】将 AA (Apply All) 按钮放在 Selected Gear 标题旁边
+            Widgets.Label(new Rect(innerRect.x, innerRect.y, 120f, 24f), "Selected Gear");
+
+            Rect clearButtonRect = new Rect(innerRect.xMax - 70f, innerRect.y, 70f, 20f);
+            if (Widgets.ButtonText(clearButtonRect, "Clear All"))
             {
-                var factionDef = DefDatabase<FactionDef>.GetNamedSilentFail(selectedFactionDefName);
-                if (factionDef != null && factionDef.pawnGroupMakers != null)
-                {
-                    kindDefsToDraw.Clear();
-                    foreach (var pawnGroupMaker in factionDef.pawnGroupMakers)
-                    {
-                        if (pawnGroupMaker.options != null)
-                        {
-                            foreach (var option in pawnGroupMaker.options)
-                            {
-                                if (option.kind != null && !kindDefsToDraw.Contains(option.kind))
-                                    kindDefsToDraw.Add(option.kind);
-                            }
-                        }
-                    }
-                }
-            }
-            else
-            {
-                // 【修复 5】同样防止兵种列表因为 null label 崩溃
-                kindDefsToDraw = DefDatabase<PawnKindDef>.AllDefs
-                    .OrderBy(k => k.label != null ? k.LabelCap.ToString() : k.defName)
-                    .ToList();
+                if (currentKindData != null) { ClearAllGear(currentKindData); FactionGearCustomizerMod.Settings.Write(); }
             }
 
-            Rect kindListViewRect = new Rect(0, 0, kindListOutRect.width - 16f, kindDefsToDraw.Count * 32f);
-            Widgets.BeginScrollView(kindListOutRect, ref kindListScrollPos, kindListViewRect);
-            float kindY = 0;
-            
-            // 【修复 5.1】应用安全排序
-            var sortedKindDefs = kindDefsToDraw.OrderBy(k => k.label != null ? k.LabelCap.ToString() : k.defName);
-            
-            foreach (var kindDef in sortedKindDefs)
+            Rect aaButtonRect = new Rect(clearButtonRect.x - 35f, innerRect.y, 30f, 20f);
+            if (Widgets.ButtonText(aaButtonRect, "AA"))
             {
-                Rect rowRect = new Rect(0, kindY, kindListViewRect.width, 32f);
-                if (selectedKindDefName == kindDef.defName)
-                    Widgets.DrawHighlightSelected(rowRect);
-                else if (Mouse.IsOver(rowRect))
-                    Widgets.DrawHighlight(rowRect);
-
-                bool isModified = false;
-                if (!string.IsNullOrEmpty(selectedFactionDefName))
+                if (!string.IsNullOrEmpty(selectedFactionDefName) && !string.IsNullOrEmpty(selectedKindDefName))
                 {
-                    var factionData = FactionGearCustomizerMod.Settings.factionGearData.FirstOrDefault(f => f.factionDefName == selectedFactionDefName);
-                    if (factionData != null)
-                    {
-                        var kindData = factionData.kindGearData.FirstOrDefault(k => k.kindDefName == kindDef.defName);
-                        if (kindData != null)
-                        {
-                            isModified = kindData.isModified;
-                        }
-                    }
+                    CopyKindDefGear(); // 复制当前兵种配置
+                    ApplyToAllKindsInFaction(); // 应用到全局
+                    Messages.Message("Applied current gear to ALL Kind Defs in this faction!", MessageTypeDefOf.PositiveEvent);
                 }
+            }
+            TooltipHandler.TipRegion(aaButtonRect, "Apply current gear to ALL other Kind Defs in this faction");
 
-                Rect labelRect = new Rect(rowRect.x + 6f, rowRect.y, rowRect.width - 20f, rowRect.height);
-                
-                // 【修复 6】安全获取兵种名称
-                string labelText = kindDef.label != null ? kindDef.LabelCap.ToString() : kindDef.defName;
-                
-                if (isModified)
+            Rect tabRect = new Rect(innerRect.x, innerRect.y + 24f, innerRect.width, 24f);
+            DrawCategoryTabs(tabRect);
+
+            float totalFixedHeight = 24f + 24f + 10f;
+            float availableHeight = innerRect.height - totalFixedHeight;
+            float previewHeight = Mathf.Clamp(availableHeight * 0.3f, 50f, 100f);
+            float listHeight = Mathf.Max(availableHeight - previewHeight, 80f);
+            Rect listOutRect = new Rect(innerRect.x, tabRect.yMax + 5f, innerRect.width, listHeight);
+
+            // 【修复 1】动态计算展开和折叠的总高度
+            float contentHeight = 0f;
+            foreach (var item in gearItemsToDraw) {
+                contentHeight += (item == expandedGearItem) ? 60f : 30f;
+            }
+            Rect listViewRect = new Rect(0, 0, listOutRect.width - 16f, Mathf.Max(contentHeight, listOutRect.height));
+
+            Widgets.BeginScrollView(listOutRect, ref gearListScrollPos, listViewRect);
+            if (gearItemsToDraw.Any() && currentKindData != null)
+            {
+                Listing_Standard gearListing = new Listing_Standard();
+                gearListing.Begin(listViewRect);
+                foreach (var gearItem in gearItemsToDraw.ToList())
                 {
-                    GUI.color = Color.yellow;
-                    Widgets.Label(new Rect(labelRect.x, labelRect.y + 6f, labelRect.width, 20f), labelText);
-                    Widgets.DrawTextureFitted(new Rect(labelRect.x - 20f, labelRect.y + 8f, 16f, 16f), TexCache.ApplyTex, 0.8f);
-                    GUI.color = Color.white;
+                    bool isExpanded = (gearItem == expandedGearItem);
+                    // 根据是否展开，分配不同的行高
+                    Rect rowRect = gearListing.GetRect(isExpanded ? 56f : 28f);
+                    DrawGearItem(rowRect, gearItem, currentKindData, isExpanded);
+                    gearListing.Gap(2f);
                 }
-                else
+                gearListing.End();
+            }
+            Widgets.EndScrollView();
+🛠️ 3. 彻底重构物品绘制（折叠与展开）
+将原来的 DrawGearItem 方法签名和内容完全替换为支持展开逻辑的以下代码：
+
+C#
+        // 【修复 1】支持点击展开滑块的 UI 重构
+        private static void DrawGearItem(Rect rect, GearItem gearItem, KindGearData kindData, bool isExpanded)
+        {
+            var thingDef = gearItem.ThingDef;
+            if (thingDef == null) return;
+
+            Widgets.DrawHighlightIfMouseover(rect);
+            if (gearItem.weight != 1f)
+            {
+                GUI.color = new Color(1f, 0.8f, 0.4f, 0.3f);
+                Widgets.DrawHighlight(rect);
+                GUI.color = Color.white;
+            }
+
+            // 第一行：图标、名称、极简权重文本（仅折叠时）、删除按钮
+            Rect row1 = new Rect(rect.x, rect.y, rect.width, 28f);
+            Rect iconRect = new Rect(row1.x + 4f, row1.y + 2f, 24f, 24f);
+            Rect removeRect = new Rect(row1.xMax - 26f, row1.y + 2f, 24f, 24f);
+            
+            // 互交区域（点击空白处展开/折叠，避开删除按钮）
+            Rect interactRect = new Rect(row1.x, row1.y, row1.width - 30f, 28f);
+            if (Widgets.ButtonInvisible(interactRect))
+            {
+                expandedGearItem = (expandedGearItem == gearItem) ? null : gearItem;
+            }
+
+            if (thingDef.uiIcon != null) GUI.DrawTexture(iconRect, thingDef.uiIcon);
+            else if (thingDef.graphic?.MatSingle?.mainTexture != null) GUI.DrawTexture(iconRect, thingDef.graphic.MatSingle.mainTexture);
+
+            Rect nameRect = new Rect(iconRect.xMax + 8f, row1.y, row1.width - 100f, 28f);
+            Text.Anchor = TextAnchor.MiddleLeft;
+            Text.WordWrap = false; // 防止超长名字换行把 UI 撑爆
+            Widgets.Label(nameRect, thingDef.LabelCap);
+            Text.WordWrap = true;
+
+            // 折叠状态时，在最右侧极简显示当前权重
+            if (!isExpanded)
+            {
+                Text.Anchor = TextAnchor.MiddleRight;
+                GUI.color = Color.gray;
+                Widgets.Label(new Rect(removeRect.x - 45f, row1.y, 40f, 28f), $"W:{gearItem.weight:F1}");
+                GUI.color = Color.white;
+            }
+            Text.Anchor = TextAnchor.UpperLeft;
+
+            if (Widgets.ButtonText(removeRect, "X"))
+            {
+                RemoveGearItem(gearItem, kindData);
+                if (expandedGearItem == gearItem) expandedGearItem = null;
+                FactionGearCustomizerMod.Settings.Write();
+            }
+
+            // 第二行：仅在展开时绘制大尺寸精度滑块
+            if (isExpanded)
+            {
+                Rect row2 = new Rect(rect.x, rect.y + 28f, rect.width, 28f);
+                Rect sliderRect = new Rect(row2.x + 10f, row2.y + 4f, row2.width - 60f, 20f);
+                Rect weightRect = new Rect(row2.xMax - 40f, row2.y, 35f, 28f);
+
+                gearItem.weight = Widgets.HorizontalSlider(sliderRect, gearItem.weight, 0.1f, 10f);
+                Text.Anchor = TextAnchor.MiddleCenter;
+                Widgets.Label(weightRect, gearItem.weight.ToString("F1"));
+                Text.Anchor = TextAnchor.UpperLeft;
+            }
+        }
+最后，为了防止切换页签时滑块状态错乱，在 DrawCategoryTabs 方法中找到 if (Widgets.ButtonInvisible(tab))，在里面加一行：
+
+C#
+                if (Widgets.ButtonInvisible(tab))
                 {
-                    Widgets.Label(new Rect(labelRect.x, labelRect.y + 6f, labelRect.width, 20f), labelText);
+                    selectedCategory = category;
+                    expandedGearItem = null; // 【新增】切换页签时自动收起所有展开项
+                    needCalculateBounds = true;
                 }
-                // ... 保留后续点击代码
+🛠️ 4. 解决右侧列表浮动滑块 (FloatRange) 的溢出问题
+找到 DrawFilters 方法中，绘制“市场价值”滑块的代码区域，将其替换为：
 
-```
+C#
+            // 【修复 3】修复市场价值滑块文本溢出和精度问题
+            Rect mvHeaderRect = listing.GetRect(18f);
+            Text.Font = GameFont.Tiny;
+            GUI.color = Color.gray;
+            // 剥离官方滑块内部的文字，我们将上下限以整数形式画在滑块正上方
+            Widgets.Label(mvHeaderRect, $"Value Range: {marketValueFilter.min:F0} - {marketValueFilter.max:F0}");
+            Text.Font = GameFont.Small;
+            GUI.color = Color.white;
 
-### 💡 核心改动总结：
-
-经过这个修复，Unity 将不再因为拿到 `null` 而彻底罢工，反射引起的巨大开销和卡顿也彻底消失了。现在你的列表滚动会极其丝滑，且在任何界面（主菜单或游戏中）打开都不会再红字刷屏。
+            Rect marketValueRect = listing.GetRect(28f);
+            // 传入 null 去掉内部 label，并使用 ToStringStyle.Integer 强行抹除 .00 的小数点
+            Widgets.FloatRange(marketValueRect, 3, ref marketValueFilter, minMarketValue, maxMarketValue, null, ToStringStyle.Integer);
+完成这四步替换后，你的 UI 会变得极其清爽：中间的物品默认只占细细的一行（不再重叠），点击物品瞬间平滑展开调参区域；不需要的功能按钮已清理，派系也依据使用频率排列了。去游戏里看看效果吧！

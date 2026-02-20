@@ -1,0 +1,124 @@
+Faction Gear Customizer 筛选与排序系统重构需求书
+1. 概述 (Overview)
+本次重构旨在彻底升级 Mod 设置界面右侧的“物品库（Item Library）”筛选器。通过引入基于上下文（武器/服装类型）的智能排序、动态边界的双向拖动条，以及严格的渲染帧缓存机制，大幅提升玩家寻找和配置特定装备的效率，同时杜绝 UI 卡顿和性能泄漏。
+
+2. 核心功能需求 (Functional Requirements)
+2.1 筛选系统 (Filtering System)
+Mod来源筛选 (保留兼容)：
+
+保留现有的 GetModGroup 算法（将 VE、CE 等子模组打包为一个大类）。
+
+下拉菜单选择，默认值为 "All"。
+
+科技水平筛选 (Tech Level)：
+
+下拉菜单选择（Neolithic, Industrial, Spacer 等），默认值为 "All"。
+
+动态市场价值区间 (Market Value FloatRange)：
+
+动态上下限计算：当玩家切换装备大类（如从“远程”切到“近战”），或改变 Mod 来源时，系统必须遍历当前初步筛选后的物品池，找出真实的最便宜（Min）和最贵（Max）物品价值，作为滑块的两端极限。
+
+双向拖动交互：使用官方的双向区间滑块组件。
+
+数值可视化：滑块左侧显示当前区间下限数值，右侧显示上限数值（例如：150 💰 [===O----O===] 4500 💰）。
+
+2.2 智能动态排序系统 (Context-Aware Sorting System)
+系统必须根据当前选中的装备分类（GearCategory），动态隐藏或显示不支持的排序选项。
+排序控制包含两个组件：排序字段 (Sort Field) 和 排序方向 (Asc/Desc 切换按钮)。
+
+全品类通用排序项：
+
+Name (名称 - 字典序)
+
+MarketValue (市场价值)
+
+TechLevel (科技等级)
+
+仅限“远程武器 (Weapons)”显示的排序项：
+
+Range (射程)
+
+Accuracy (精度 - 综合或特定距离精度)
+
+Damage (单发伤害)
+
+DPS (秒伤)
+
+仅限“近战武器 (MeleeWeapons)”显示的排序项：
+
+Damage (单发伤害)
+
+DPS (秒伤)
+
+仅限“护甲/衣物 (Armors/Apparel)”显示的排序项：
+
+Armor_Sharp (防刺穿护甲 %)
+
+Armor_Blunt (防钝击护甲 %)
+
+3. 性能安全与架构设计 (Performance & Architecture)
+在 RimWorld 的 OnGUI 循环中，每秒执行 60 次以上的代码必须极其轻量。
+
+数据流隔离与脏标记 (Dirty Flag Caching)：
+
+绝对禁止在每帧调用 LINQ（如 .Where(), .OrderBy()）遍历全图鉴。
+
+建立缓存池：private static List<ThingDef> cachedLibraryItems;
+
+设置状态机：只有当玩家切换分类、修改搜索词、修改下拉菜单、松开滑块、点击排序时，才将 needRefreshList = true。渲染帧只负责绘制 cachedLibraryItems。
+
+边界计算剥离：
+
+市场价值的 Min/Max 计算必须在“更换分类或切换 Mod”时仅触发一次，将结果固化为 float boundsMin 和 float boundsMax，再交给 Widgets.FloatRange 渲染，防止每帧都在遍历找最大值。
+
+异常拦截 (Fail-Safe)：
+
+对读取第三方 Mod（尤其是 CE 等重写了射击底层逻辑的 Mod）的属性时，必须使用 try-catch 或抽象安全方法（GetStatValueAbstract），属性缺失时返回 0，确保不引发 GUI 级联崩溃。
+
+4. UI 布局与交互规范 (UI Design & Layout)
+建议在右侧面板的 DrawFilters 区域采用极简的矩阵式布局，充分利用 Listing_Standard 的能力：
+
+Row 1: 搜索框 (Search Box) - 占满整行。
+
+Row 2 (筛选区):
+
+[Mod 下拉菜单 (50%宽度)] | [Tech Level 下拉菜单 (50%宽度)]
+
+Row 3 (排序区):
+
+[Sort By: 动态字段 下拉菜单 (70%宽度)] | [Order: Asc/Desc 切换按钮 (30%宽度)]
+
+Row 4 (动态价值滑块):
+
+采用三段式自定义绘制：Label(当前Min) + Widgets.FloatRange + Label(当前Max)。
+
+5. RimWorld 游戏机制 API 解析工作流指南 (For Rim-Searcher / Dev)
+为了实现上述功能，重构代码时需严格调用以下 RimWorld 原生底层 API：
+
+市场价值获取：
+
+使用 thingDef.BaseMarketValue。
+
+武器射程获取：
+
+读取 thingDef.Verbs.FirstOrDefault(v => v.isPrimary)?.range ?? 0f。
+
+武器精度获取 (Accuracy)：
+
+原版枪械精度挂载于 StatDef：调用 thingDef.GetStatValueAbstract(StatDefOf.AccuracyMedium) (推荐以中距离精度为基准排序)。
+
+护甲属性获取 (Armor)：
+
+调用 thingDef.GetStatValueAbstract(StatDefOf.ArmorRating_Sharp) 获取锐器防御。
+
+调用 thingDef.GetStatValueAbstract(StatDefOf.ArmorRating_Blunt) 获取钝器防御。
+
+单发伤害 (Damage)：
+
+远程：需解析 verb.defaultProjectile.projectile.GetDamageAmount(null)。
+
+近战：需解析 thingDef.tools.Max(t => t.power)。
+
+DPS计算：
+
+需综合 Damage 与 cooldownTime (近战) 或 warmupTime + BurstShotCount * TicksBetweenShots (远程)。
