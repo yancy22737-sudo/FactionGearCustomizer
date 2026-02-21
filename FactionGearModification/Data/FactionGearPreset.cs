@@ -35,14 +35,44 @@ namespace FactionGearCustomizer
             {
                 foreach (var kind in faction.kindGearData)
                 {
+                    // 尝试加载原始数据进行比对
+                    PawnKindDef kindDef = DefDatabase<PawnKindDef>.GetNamedSilentFail(kind.kindDefName);
+                    HashSet<string> originalGearNames = new HashSet<string>();
+
+                    if (kindDef != null)
+                    {
+                        KindGearData originalData = new KindGearData(kind.kindDefName);
+                        // 使用 FactionGearManager 加载默认配置
+                        FactionGearManager.LoadKindDefGear(kindDef, originalData);
+
+                        var originalAllGear = originalData.weapons
+                            .Concat(originalData.meleeWeapons)
+                            .Concat(originalData.armors)
+                            .Concat(originalData.apparel)
+                            .Concat(originalData.others);
+
+                        foreach (var gear in originalAllGear)
+                        {
+                            if (!string.IsNullOrEmpty(gear.thingDefName))
+                            {
+                                originalGearNames.Add(gear.thingDefName);
+                            }
+                        }
+                    }
+
                     var allGear = kind.weapons.Concat(kind.meleeWeapons).Concat(kind.armors).Concat(kind.apparel).Concat(kind.others);
                     foreach (var gear in allGear)
                     {
                         var def = gear.ThingDef;
-                        if (def != null && def.modContentPack != null && !def.modContentPack.IsCoreMod)
-                        {
-                            mods.Add(def.modContentPack.Name);
-                        }
+                        // 如果 def 为空，或者是核心模组，则跳过
+                        if (def == null || def.modContentPack == null || def.modContentPack.IsCoreMod)
+                            continue;
+
+                        // 如果该物品存在于原始配置中，则跳过（说明未在修改中涉及）
+                        if (originalGearNames.Contains(def.defName))
+                            continue;
+
+                        mods.Add(def.modContentPack.Name);
                     }
                 }
             }
@@ -78,6 +108,19 @@ namespace FactionGearCustomizer
                 }
             }
             CalculateRequiredMods();
+        }
+
+        public FactionGearPreset DeepCopy()
+        {
+            var copy = new FactionGearPreset();
+            copy.name = this.name;
+            copy.description = this.description;
+            copy.requiredMods = new List<string>(this.requiredMods);
+            foreach (var faction in this.factionGearData)
+            {
+                copy.factionGearData.Add(faction.DeepCopy());
+            }
+            return copy;
         }
     }
 }

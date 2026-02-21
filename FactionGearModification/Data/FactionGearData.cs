@@ -66,6 +66,10 @@ namespace FactionGearCustomizer
         public void ResetToDefault()
         {
             kindGearData.Clear();
+            if (kindGearDataDict != null)
+            {
+                kindGearDataDict.Clear();
+            }
         }
         
         // 添加或更新兵种数据
@@ -77,12 +81,38 @@ namespace FactionGearCustomizer
                 kindGearData.Remove(existing);
             }
             kindGearData.Add(data);
+            
+            // 同步更新字典索引
+            if (kindGearDataDict == null)
+            {
+                InitializeDictionary();
+            }
+            
+            if (kindGearDataDict.ContainsKey(data.kindDefName))
+            {
+                kindGearDataDict[data.kindDefName] = data;
+            }
+            else
+            {
+                kindGearDataDict.Add(data.kindDefName, data);
+            }
         }
         
         // 获取指定兵种的数据
         public KindGearData GetKindData(string kindDefName)
         {
             return kindGearData.FirstOrDefault(k => k.kindDefName == kindDefName);
+        }
+
+        public FactionGearData DeepCopy()
+        {
+            var copy = new FactionGearData(factionDefName);
+            foreach (var kind in kindGearData)
+            {
+                copy.kindGearData.Add(kind.DeepCopy());
+            }
+            copy.InitializeDictionary();
+            return copy;
         }
     }
 }

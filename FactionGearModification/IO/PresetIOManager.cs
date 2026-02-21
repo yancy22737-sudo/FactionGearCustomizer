@@ -18,6 +18,7 @@ namespace FactionGearCustomizer
                 Scribe.saver.FinalizeSaving();
                 
                 string xml = File.ReadAllText(path);
+                Log.Message("[FactionGearCustomizer] Preset exported successfully.");
                 return Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(xml));
             }
             catch (System.Exception e)
@@ -41,6 +42,7 @@ namespace FactionGearCustomizer
                 Scribe_Deep.Look(ref preset, "Preset");
                 Scribe.loader.FinalizeLoading();
 
+                Log.Message("[FactionGearCustomizer] Preset imported successfully.");
                 return preset;
             }
             catch

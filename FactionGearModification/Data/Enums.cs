@@ -10,4 +10,18 @@ namespace FactionGearCustomizer
         Apparel,
         Others
     }
+
+    public enum EditorMode 
+    { 
+        Simple, 
+        Advanced 
+    }
+
+    public enum AdvancedTab 
+    { 
+        General, 
+        Apparel, 
+        Weapons, 
+        Hediffs 
+    }
 }

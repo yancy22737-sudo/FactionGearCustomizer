@@ -50,10 +50,11 @@ namespace FactionGearCustomizer
             
             // 1. 顶部标题和搜索框
             Widgets.Label(new Rect(innerRect.x, innerRect.y, innerRect.width, 24f), "Saved Presets");
-            presetSearchText = Widgets.TextField(new Rect(innerRect.x, innerRect.y + 24f, innerRect.width, 24f), presetSearchText);
+            presetSearchText = DrawTextFieldWithPlaceholder(new Rect(innerRect.x, innerRect.y + 24f, innerRect.width, 24f), presetSearchText, "Search presets...");
             
-            // 2. 列表区域只占上方 80%
-            Rect listOutRect = new Rect(innerRect.x, innerRect.y + 55f, innerRect.width, innerRect.height - 150f);
+            // 2. 列表区域动态高度
+            float bottomAreaHeight = 95f;
+            Rect listOutRect = new Rect(innerRect.x, innerRect.y + 55f, innerRect.width, innerRect.height - 55f - bottomAreaHeight);
             
             // 3. 执行搜索过滤
             List<FactionGearPreset> presets = FactionGearCustomizerMod.Settings.presets;
@@ -68,14 +69,23 @@ namespace FactionGearCustomizer
             float y = 0;
             foreach (var preset in presets)
             {
-                // 绘制列表项... [保持你现有的高亮和点击代码不变]
                 Rect rowRect = new Rect(0, y, listViewRect.width, 24f);
                 if (selectedPreset == preset)
                     Widgets.DrawHighlightSelected(rowRect);
                 else if (Mouse.IsOver(rowRect))
                     Widgets.DrawHighlight(rowRect);
                 
-                Widgets.Label(rowRect, preset.name);
+                string displayName = preset.name;
+                bool isActive = preset.name == FactionGearCustomizerMod.Settings.currentPresetName;
+                if (isActive)
+                {
+                    displayName += " (Active)";
+                    GUI.color = Color.green;
+                }
+                
+                Widgets.Label(rowRect, displayName);
+                GUI.color = Color.white;
+                
                 if (Widgets.ButtonInvisible(rowRect))
                 {
                     selectedPreset = preset;
@@ -85,12 +95,24 @@ namespace FactionGearCustomizer
             Widgets.EndScrollView();
             
             // 【新增】将新建预设移到左侧底部
-            float bottomY = innerRect.yMax - 85f;
+            float bottomY = listOutRect.yMax + 5f;
             Widgets.DrawLineHorizontal(innerRect.x, bottomY, innerRect.width);
-            Widgets.Label(new Rect(innerRect.x, bottomY + 5f, innerRect.width, 24f), "Create New:");
-            newPresetName = Widgets.TextField(new Rect(innerRect.x, bottomY + 30f, innerRect.width - 70f, 24f), newPresetName);
             
-            if (Widgets.ButtonText(new Rect(innerRect.xMax - 65f, bottomY + 30f, 65f, 24f), "Add"))
+            // Import Button
+            Rect importRect = new Rect(innerRect.x, bottomY + 5f, innerRect.width, 24f);
+            if (Widgets.ButtonText(importRect, "Import from Clipboard"))
+            {
+                ImportPreset();
+            }
+            TooltipHandler.TipRegion(importRect, "Import a preset from base64 string in your clipboard.");
+            
+            Widgets.DrawLineHorizontal(innerRect.x, bottomY + 34f, innerRect.width);
+
+            // Create New Section
+            Widgets.Label(new Rect(innerRect.x, bottomY + 40f, innerRect.width, 20f), "Create New:");
+            newPresetName = DrawTextFieldWithPlaceholder(new Rect(innerRect.x, bottomY + 62f, innerRect.width - 65f, 24f), newPresetName, "Name...");
+            
+            if (Widgets.ButtonText(new Rect(innerRect.xMax - 60f, bottomY + 62f, 60f, 24f), "Add"))
             {
                 CreateNewPreset();
             }
@@ -108,42 +130,88 @@ namespace FactionGearCustomizer
             }
 
             Rect innerRect = rect.ContractedBy(10f);
+            
+            // 底部按钮区域高度
+            float bottomHeight = 35f;
+            // 内容区域高度
+            float contentHeight = innerRect.height - bottomHeight - 5f;
+            
+            Rect contentRect = new Rect(innerRect.x, innerRect.y, innerRect.width, contentHeight);
             Listing_Standard listing = new Listing_Standard();
-            listing.Begin(innerRect);
+            listing.Begin(contentRect);
 
             listing.Label("Preset Details:");
-            selectedPreset.name = listing.TextEntry(selectedPreset.name);
-            selectedPreset.description = listing.TextEntry(selectedPreset.description, 2);
             
-            // 把那两个容易混淆的按钮名称改掉
-            if (listing.ButtonText("1. Save Meta Info (Name/Desc)")) SavePreset();
+            // Name
+            Rect nameRect = listing.GetRect(24f);
+            string newName = DrawTextFieldWithPlaceholder(nameRect, selectedPreset.name, "Preset Name...");
+            if (newName != selectedPreset.name)
+            {
+                selectedPreset.name = newName;
+            }
+            listing.Gap(4f);
+            
+            // Description
+            Rect descRect = listing.GetRect(50f);
+            string newDesc = DrawTextFieldWithPlaceholder(descRect, selectedPreset.description, "Description...", true);
+            if (newDesc != selectedPreset.description)
+            {
+                selectedPreset.description = newDesc;
+            }
+            
             listing.Gap(10f);
             
-            GUI.color = Color.cyan;
-            if (listing.ButtonText("2. Overwrite Preset With Current Active Gear")) SaveFromCurrentSettings();
-            GUI.color = Color.white;
+            // Save/Update Section
+            listing.Label("<b>Management:</b>");
+            
+            // Two columns for update buttons
+            Rect updateRow = listing.GetRect(30f);
+            if (Widgets.ButtonText(updateRow.LeftHalf().ContractedBy(2f), "Save Name/Desc"))
+            {
+                 SavePreset();
+                 Messages.Message("Preset metadata saved.", MessageTypeDefOf.TaskCompletion, false);
+            }
+            
+            if (Widgets.ButtonText(updateRow.RightHalf().ContractedBy(2f), "Update from Game")) 
+            {
+                Find.WindowStack.Add(new Dialog_MessageBox(
+                    $"Overwrite preset '{selectedPreset.name}' with current game settings?",
+                    "Yes", delegate { SaveFromCurrentSettings(); Messages.Message("Preset updated from game settings.", MessageTypeDefOf.PositiveEvent); },
+                    "No", null
+                ));
+            }
+            TooltipHandler.TipRegion(updateRow.RightHalf(), "Overwrite this preset's gear data with your current in-game configuration.");
+
             listing.GapLine();
 
-            // 自动计算高度，不再硬编码 y += 160f
+            // Mod List
             listing.Label("Required Mods:");
-            // 这里调用你原本画Mod的方法，但高度改小点
-            DrawModList(listing.GetRect(80f)); 
+            DrawModList(listing.GetRect(100f)); 
             listing.Gap(10f);
 
             listing.Label("Faction Preview:");
-            DrawFactionPreview(listing.GetRect(200f)); 
+            // 使用剩余空间，但要保留底部按钮空间
+            float remainingHeight = contentRect.height - listing.CurHeight;
+            if (remainingHeight > 50f)
+            {
+                DrawFactionPreview(listing.GetRect(remainingHeight));
+            }
             
-            listing.GapLine();
-            // 危险操作放最底下
-            Rect dangerRect = listing.GetRect(30f);
-            if (Widgets.ButtonText(new Rect(dangerRect.x, dangerRect.y, 100f, 30f), "Load/Apply")) ApplyPreset();
-            if (Widgets.ButtonText(new Rect(dangerRect.x + 110f, dangerRect.y, 100f, 30f), "Export to Clipboard")) ExportPreset();
-            
-            GUI.color = Color.red;
-            if (Widgets.ButtonText(new Rect(dangerRect.xMax - 100f, dangerRect.y, 100f, 30f), "Delete Preset")) DeletePreset();
-            GUI.color = Color.white;
-
             listing.End();
+
+            // Bottom Actions
+            Rect bottomRect = new Rect(innerRect.x, innerRect.yMax - 30f, innerRect.width, 30f);
+            float btnWidth = (bottomRect.width - 10f) / 3f;
+            
+            if (Widgets.ButtonText(new Rect(bottomRect.x, bottomRect.y, btnWidth, 30f), "Load Preset")) ApplyPreset();
+            TooltipHandler.TipRegion(new Rect(bottomRect.x, bottomRect.y, btnWidth, 30f), "Apply this preset to your game.");
+            
+            if (Widgets.ButtonText(new Rect(bottomRect.x + btnWidth + 5f, bottomRect.y, btnWidth, 30f), "Export")) ExportPreset();
+            TooltipHandler.TipRegion(new Rect(bottomRect.x + btnWidth + 5f, bottomRect.y, btnWidth, 30f), "Copy preset to clipboard for sharing.");
+            
+            GUI.color = new Color(1f, 0.5f, 0.5f);
+            if (Widgets.ButtonText(new Rect(bottomRect.x + (btnWidth + 5f) * 2, bottomRect.y, btnWidth, 30f), "Delete")) DeletePreset();
+            GUI.color = Color.white;
         }
 
         private void CreateNewPreset()
@@ -181,6 +249,9 @@ namespace FactionGearCustomizer
                 newPreset.SaveFromCurrentSettings(FactionGearCustomizerMod.Settings.factionGearData);
                 
                 FactionGearCustomizerMod.Settings.AddPreset(newPreset);
+                // [New] Set as current preset
+                FactionGearCustomizerMod.Settings.currentPresetName = newPreset.name;
+                
                 selectedPreset = newPreset;
                 newPresetName = "";
                 newPresetDescription = "";
@@ -201,6 +272,37 @@ namespace FactionGearCustomizer
         {
             if (selectedPreset == null) return;
 
+            // [新增] 检查模组依赖
+            List<string> missingMods = new List<string>();
+            foreach (var modName in selectedPreset.requiredMods)
+            {
+                if (!LoadedModManager.RunningMods.Any(m => m.Name == modName))
+                {
+                    missingMods.Add(modName);
+                }
+            }
+
+            if (missingMods.Any())
+            {
+                string missingList = string.Join("\n- ", missingMods);
+                Find.WindowStack.Add(new Dialog_MessageBox(
+                    $"Warning: The following mods required by this preset are missing or not active:\n\n- {missingList}\n\nApplying this preset may result in missing items or errors. Continue?",
+                    "Yes (Risk it)", 
+                    delegate { ShowApplyConfirmation(); },
+                    "No (Cancel)", 
+                    null, 
+                    null, 
+                    true
+                ));
+            }
+            else
+            {
+                ShowApplyConfirmation();
+            }
+        }
+
+        private void ShowApplyConfirmation()
+        {
             Find.WindowStack.Add(new Dialog_MessageBox(
                 "Do you want to CLEAR current custom gear before applying this preset?\n\nYes: Overwrite everything (Recommended)\nNo: Merge preset with current tweaks",
                 "Yes (Overwrite)", delegate
@@ -239,6 +341,10 @@ namespace FactionGearCustomizer
                     existingFactionData.AddOrUpdateKindData(clonedData);
                 }
             }
+            
+            // [New] Set as current preset
+            FactionGearCustomizerMod.Settings.currentPresetName = selectedPreset.name;
+            
             FactionGearCustomizerMod.Settings.Write();
             // [优化] 添加原版右上角浮动提示，让玩家知道点下去了
             Messages.Message("Preset applied successfully to current game!", MessageTypeDefOf.PositiveEvent);
@@ -252,6 +358,12 @@ namespace FactionGearCustomizer
                     $"Are you sure you want to permanently delete preset '{selectedPreset.name}'?",
                     "Delete", delegate
                     {
+                        // [New] If deleting current preset, clear currentPresetName
+                        if (FactionGearCustomizerMod.Settings.currentPresetName == selectedPreset.name)
+                        {
+                            FactionGearCustomizerMod.Settings.currentPresetName = null;
+                        }
+
                         FactionGearCustomizerMod.Settings.RemovePreset(selectedPreset);
                         selectedPreset = null;
                         Messages.Message("Preset deleted.", MessageTypeDefOf.NeutralEvent);
@@ -305,6 +417,7 @@ namespace FactionGearCustomizer
                 if (string.IsNullOrEmpty(base64Content))
                 {
                     Log.Message("[FactionGearCustomizer] Clipboard is empty!");
+                    Messages.Message("Clipboard is empty!", MessageTypeDefOf.RejectInput, false);
                     return;
                 }
                 
@@ -312,6 +425,17 @@ namespace FactionGearCustomizer
                 FactionGearPreset newPreset = PresetIOManager.ImportFromBase64(base64Content);
                 if (newPreset != null)
                 {
+                    // 检查重名并处理
+                    string originalName = newPreset.name;
+                    string finalName = originalName;
+                    int count = 1;
+                    while (FactionGearCustomizerMod.Settings.presets.Any(p => p.name == finalName))
+                    {
+                        finalName = $"{originalName} (Imported {count})";
+                        count++;
+                    }
+                    newPreset.name = finalName;
+
                     // 添加到预设列表
                     FactionGearCustomizerMod.Settings.AddPreset(newPreset);
                     selectedPreset = newPreset;
@@ -321,11 +445,13 @@ namespace FactionGearCustomizer
                 else
                 {
                     Log.Message("[FactionGearCustomizer] Import failed: Invalid preset data!");
+                    Messages.Message("Import failed: Invalid preset data in clipboard!", MessageTypeDefOf.RejectInput, false);
                 }
             }
             catch (System.Exception e)
             {
                 Log.Message("[FactionGearCustomizer] Import failed: " + e.Message);
+                Messages.Message("Import failed: " + e.Message, MessageTypeDefOf.RejectInput, false);
             }
         }
 
@@ -373,14 +499,25 @@ namespace FactionGearCustomizer
                 Widgets.DrawBox(rect);
                 Rect innerRect = rect.ContractedBy(5f);
                 
-                Widgets.BeginScrollView(innerRect, ref modListScrollPos, new Rect(0, 0, innerRect.width - 16f, selectedPreset.requiredMods.Count * 20f));
+                Widgets.BeginScrollView(innerRect, ref modListScrollPos, new Rect(0, 0, innerRect.width - 16f, selectedPreset.requiredMods.Count * 24f));
                 float y = 0;
                 
                 foreach (var mod in selectedPreset.requiredMods)
                 {
-                    Widgets.Label(new Rect(0, y, innerRect.width, 20f), mod);
-                    y += 20f;
+                    bool isActive = LoadedModManager.RunningMods.Any(m => m.Name == mod);
+                    GUI.color = isActive ? Color.green : Color.red;
+                    
+                    Rect labelRect = new Rect(0, y, innerRect.width, 24f);
+                    Widgets.Label(labelRect, mod + (isActive ? "" : " (Missing)"));
+                    
+                    if (!isActive)
+                    {
+                        TooltipHandler.TipRegion(labelRect, "This mod is not active in your current game.");
+                    }
+                    
+                    y += 24f;
                 }
+                GUI.color = Color.white;
                 
                 Widgets.EndScrollView();
             }
@@ -388,6 +525,31 @@ namespace FactionGearCustomizer
             {
                 Widgets.Label(rect, "No required mods.");
             }
+        }
+
+        private string DrawTextFieldWithPlaceholder(Rect rect, string text, string placeholder, bool isMultiLine = false)
+        {
+            string result;
+            if (isMultiLine)
+            {
+                result = Widgets.TextArea(rect, text);
+            }
+            else
+            {
+                result = Widgets.TextField(rect, text);
+            }
+
+            if (string.IsNullOrEmpty(result))
+            {
+                var anchor = Text.Anchor;
+                var color = GUI.color;
+                Text.Anchor = isMultiLine ? TextAnchor.UpperLeft : TextAnchor.MiddleLeft;
+                GUI.color = new Color(0.6f, 0.6f, 0.6f, 1f);
+                Widgets.Label(new Rect(rect.x + 5f, rect.y, rect.width - 5f, rect.height), placeholder);
+                GUI.color = color;
+                Text.Anchor = anchor;
+            }
+            return result;
         }
     }
 }

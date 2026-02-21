@@ -19,6 +19,35 @@ namespace FactionGearCustomizer
 
         public override string SettingsCategory() => "Faction Gear Customizer";
 
+        public override void WriteSettings()
+        {
+            if (FactionGearEditor.IsDirty)
+            {
+                // Unsaved changes detected - ask user for confirmation
+                Find.WindowStack.Add(new Dialog_MessageBox(
+                    "You have unsaved changes. Do you want to save them?",
+                    "Save",
+                    () => {
+                        FactionGearEditor.SaveChanges();
+                        Messages.Message("Settings saved.", MessageTypeDefOf.TaskCompletion, false);
+                    },
+                    "Discard",
+                    () => {
+                        FactionGearEditor.DiscardChanges();
+                        Messages.Message("Changes discarded.", MessageTypeDefOf.TaskCompletion, false);
+                    },
+                    "Unsaved Changes",
+                    false,
+                    null,
+                    null
+                ));
+            }
+            else
+            {
+                base.WriteSettings();
+            }
+        }
+
         public override void DoSettingsWindowContents(Rect inRect)
         {
             base.DoSettingsWindowContents(inRect);

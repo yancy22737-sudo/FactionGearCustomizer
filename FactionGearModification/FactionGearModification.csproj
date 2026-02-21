@@ -3,27 +3,9 @@
   <PropertyGroup>
     <TargetFramework>net48</TargetFramework>
     <AssemblyName>FactionGearCustomizer</AssemblyName>
-    <RootNamespace>actionGearCustomizer</RootNamespace>
-    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <RootNamespace>FactionGearCustomizer</RootNamespace>
+    <EnableDefaultCompileItems>true</EnableDefaultCompileItems>
   </PropertyGroup>
-
-  <ItemGroup>
-    <Compile Include="Core\FactionGearCustomizerMod.cs" />
-    <Compile Include="Core\FactionGearCustomizerSettings.cs" />
-    <Compile Include="Data\Enums.cs" />
-    <Compile Include="Data\GearItem.cs" />
-    <Compile Include="Data\KindGearData.cs" />
-    <Compile Include="Data\FactionGearData.cs" />
-    <Compile Include="Data\FactionGearPreset.cs" />
-    <Compile Include="Managers\FactionGearManager.cs" />
-    <Compile Include="Managers\GearApplier.cs" />
-    <Compile Include="IO\PresetIOManager.cs" />
-    <Compile Include="Patches\Patch_GeneratePawn.cs" />
-    <Compile Include="UI\TexCache.cs" />
-    <Compile Include="UI\FactionGearEditor.cs" />
-    <Compile Include="UI\PresetManagerWindow.cs" />
-    <Compile Include="UI\Dialog_InfoCard.cs" />
-  </ItemGroup>
 
   <ItemGroup>
     <Reference Include="0Harmony">

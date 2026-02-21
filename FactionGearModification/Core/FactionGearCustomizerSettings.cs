@@ -15,10 +15,18 @@ namespace FactionGearCustomizer
         [Unsaved]
         private Dictionary<string, FactionGearData> factionGearDataDict;
 
+        // [新增] 强制忽略原版限制的全局开关
+        public bool forceIgnoreRestrictions = false;
+
+        // [New] Current active preset name
+        public string currentPresetName = null;
+
         public override void ExposeData()
         {
             base.ExposeData();
             Scribe_Values.Look(ref version, "version", 2);
+            Scribe_Values.Look(ref forceIgnoreRestrictions, "forceIgnoreRestrictions", false);
+            Scribe_Values.Look(ref currentPresetName, "currentPresetName");
             
             // 处理不同版本的数据结构
             if (version == 1)
@@ -63,7 +71,12 @@ namespace FactionGearCustomizer
         public void ResetToDefault()
         {
             factionGearData.Clear();
+            if (factionGearDataDict != null)
+            {
+                factionGearDataDict.Clear();
+            }
             FactionGearManager.LoadDefaultPresets();
+            currentPresetName = null;
             Write();
         }
 
@@ -100,6 +113,44 @@ namespace FactionGearCustomizer
         public void UpdatePreset(FactionGearPreset preset)
         {
             Write();
+        }
+
+        public FactionGearCustomizerSettings DeepCopy()
+        {
+            var copy = new FactionGearCustomizerSettings();
+            copy.version = this.version;
+            copy.forceIgnoreRestrictions = this.forceIgnoreRestrictions;
+            copy.currentPresetName = this.currentPresetName;
+            foreach (var faction in this.factionGearData)
+            {
+                copy.factionGearData.Add(faction.DeepCopy());
+            }
+            foreach (var preset in this.presets)
+            {
+                copy.presets.Add(preset.DeepCopy());
+            }
+            // Re-initialize dictionary for the copy
+            // Use reflection or just let it initialize on demand
+            return copy;
+        }
+
+        public void RestoreFrom(FactionGearCustomizerSettings source)
+        {
+            this.version = source.version;
+            this.forceIgnoreRestrictions = source.forceIgnoreRestrictions;
+            this.currentPresetName = source.currentPresetName;
+            this.factionGearData.Clear();
+            foreach (var faction in source.factionGearData)
+            {
+                this.factionGearData.Add(faction.DeepCopy());
+            }
+            this.presets.Clear();
+            foreach (var preset in source.presets)
+            {
+                this.presets.Add(preset.DeepCopy());
+            }
+            // Clear dictionary to force re-initialization
+            this.factionGearDataDict = null;
         }
     }
 }

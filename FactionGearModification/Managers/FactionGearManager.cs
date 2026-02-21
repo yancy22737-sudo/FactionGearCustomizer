@@ -47,6 +47,7 @@ namespace FactionGearCustomizer
                     .Where(t => t.IsApparel && t.apparel != null && t.apparel.layers != null && 
                            !t.apparel.layers.Contains(ApparelLayerDefOf.Overhead) && 
                            !t.apparel.layers.Contains(ApparelLayerDefOf.Belt) &&
+                           !t.apparel.layers.Contains(ApparelLayerDefOf.Shell) &&
                            (t.apparel.layers.Contains(ApparelLayerDefOf.OnSkin) || 
                             t.apparel.layers.Contains(ApparelLayerDefOf.Middle)) &&
                            t.GetStatValueAbstract(StatDefOf.ArmorRating_Sharp) < 0.4f).ToList();
