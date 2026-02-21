@@ -72,7 +72,7 @@ namespace FactionGearCustomizer
             if (pawn.equipment != null)
             {
                 // Check if we should clear everything
-                bool clearAll = kindData.ForceNaked || kindData.ForceOnlySelected || forceIgnore;
+                bool clearAll = kindData.ForceNaked || kindData.ForceOnlySelected;
                 
                 var equipmentToDestroy = pawn.equipment.AllEquipmentListForReading
                     .Where(eq => clearAll || eq.def.destroyOnDrop)
@@ -207,7 +207,7 @@ namespace FactionGearCustomizer
             }
 
             // Strip logic
-            if (kindData.ForceOnlySelected || FactionGearCustomizerMod.Settings.forceIgnoreRestrictions)
+            if (kindData.ForceOnlySelected)
             {
                  // Strip everything that isn't required (complex check, simplified here to strip all then re-add)
                  // Actually, TotalControl logic is: "Destroy what is worn that is NOT in the allowed list".
@@ -230,6 +230,15 @@ namespace FactionGearCustomizer
             // Advanced Mode: SpecificApparel
             if (hasAdvancedData)
             {
+                // Budget Logic (Advanced Mode)
+                bool forceIgnore = FactionGearCustomizerMod.Settings.forceIgnoreRestrictions;
+                float budget = kindData.ApparelMoney?.RandomInRange ?? pawn.kindDef.apparelMoney.RandomInRange;
+                float currentSpent = 0f;
+                if (pawn.apparel != null)
+                {
+                    currentSpent = pawn.apparel.WornApparel.Sum(a => a.MarketValue);
+                }
+
                 // Simple Required List
                 if (!kindData.ApparelRequired.NullOrEmpty())
                 {
@@ -239,7 +248,23 @@ namespace FactionGearCustomizer
                         var created = GenerateItem(pawn, item, kindData);
                         if (created is Apparel app && ApparelUtility.HasPartsToWear(pawn, app.def))
                         {
-                            pawn.apparel.Wear(app, true);
+                            // Check Budget
+                            if (!forceIgnore && (currentSpent + app.MarketValue > budget))
+                            {
+                                created.Destroy();
+                                continue;
+                            }
+
+                            try
+                            {
+                                pawn.apparel.Wear(app, true);
+                                currentSpent += app.MarketValue;
+                            }
+                            catch (Exception ex)
+                            {
+                                Log.Warning($"[FactionGearCustomizer] Failed to wear {app} on {pawn}: {ex.Message}");
+                                app.Destroy();
+                            }
                         }
                     }
                 }
@@ -253,24 +278,143 @@ namespace FactionGearCustomizer
                          var created = GenerateItem(pawn, item, kindData);
                          if (created is Apparel app && ApparelUtility.HasPartsToWear(pawn, app.def))
                          {
-                             pawn.apparel.Wear(app, true);
+                             // Check Budget
+                             if (!forceIgnore && (currentSpent + app.MarketValue > budget))
+                             {
+                                 created.Destroy();
+                                 continue;
+                             }
+
+                             try
+                             {
+                                 pawn.apparel.Wear(app, true);
+                                 currentSpent += app.MarketValue;
+                             }
+                             catch (Exception ex)
+                             {
+                                 Log.Warning($"[FactionGearCustomizer] Failed to wear {app} on {pawn}: {ex.Message}");
+                                 app.Destroy();
+                             }
                          }
                     }
                 }
             }
             // Simple Mode: Old Lists (Fallback)
-            else if (hasSimpleData)
+            if (hasSimpleData)
             {
+                // Fix: Always try to equip multiple items from the list.
+                // This allows users to specify multiple items (e.g. helmet + armor) in the same list
+                // and have them all applied if they don't conflict.
+                // Previously this was only enabled for ForceIgnore, but it should be the default behavior
+                // as users expect "what they list is what they get" (limited by slots/conflicts).
+                bool tryEquipMultiple = true;
+                bool forceIgnore = FactionGearCustomizerMod.Settings.forceIgnoreRestrictions;
+
+                // Budget Logic
+                float budget = kindData.ApparelMoney?.RandomInRange ?? pawn.kindDef.apparelMoney.RandomInRange;
+                float currentSpent = 0f;
+                if (pawn.apparel != null)
+                {
+                    currentSpent = pawn.apparel.WornApparel.Sum(a => a.MarketValue);
+                }
+
+                // Log budget info for debugging
+                // Log.Message($"[FactionGearCustomizer] Budget Check for {pawn}: Budget={budget}, CurrentSpent={currentSpent}, ForceIgnore={forceIgnore}");
+
                 void EquipApparelList(List<GearItem> gearList)
                 {
-                    if (!gearList.Any()) return;
-                    var item = GetRandomGearItem(gearList);
-                    if (item?.ThingDef != null)
+                    if (gearList.NullOrEmpty()) return;
+
+                    if (tryEquipMultiple)
                     {
-                        var created = GenerateSimpleItem(pawn, item.ThingDef, kindData, false);
-                        if (created is Apparel app && ApparelUtility.HasPartsToWear(pawn, app.def))
+                        var workingList = gearList.ToList();
+                        // Max attempts to prevent any infinite loops, though list size is natural limit
+                        int maxAttempts = workingList.Count * 2;
+                        int attempts = 0;
+
+                        while (workingList.Any() && attempts < maxAttempts)
                         {
-                            pawn.apparel.Wear(app, true);
+                            attempts++;
+                            var item = GetRandomGearItem(workingList);
+                            if (item == null) break;
+                            
+                            // Remove from working list so we don't pick it again
+                            workingList.Remove(item);
+
+                            if (item.ThingDef != null)
+                            {
+                                var created = GenerateSimpleItem(pawn, item.ThingDef, kindData, false);
+                                if (created is Apparel app)
+                                {
+                                    // Check Budget (unless ignored)
+                                    if (!forceIgnore && (currentSpent + app.MarketValue > budget))
+                                    {
+                                        created.Destroy();
+                                        continue;
+                                    }
+
+                                    if (ApparelUtility.HasPartsToWear(pawn, app.def))
+                                    {
+                                        try
+                                        {
+                                            pawn.apparel.Wear(app, true);
+                                            currentSpent += app.MarketValue;
+                                        }
+                                        catch (Exception ex)
+                                        {
+                                            Log.Warning($"[FactionGearCustomizer] Failed to wear {app} on {pawn}: {ex.Message}");
+                                            app.Destroy();
+                                        }
+                                    }
+                                    else
+                                    {
+                                        created.Destroy();
+                                    }
+                                }
+                                else if (created != null)
+                                {
+                                    created.Destroy();
+                                }
+                            }
+                        }
+                    }
+                    else
+                    {
+                        var item = GetRandomGearItem(gearList);
+                        if (item?.ThingDef != null)
+                        {
+                            var created = GenerateSimpleItem(pawn, item.ThingDef, kindData, false);
+                            if (created is Apparel app) 
+                            {
+                                // Check Budget (unless ignored)
+                                if (!forceIgnore && (currentSpent + app.MarketValue > budget))
+                                {
+                                    created.Destroy();
+                                    return;
+                                }
+
+                                if (ApparelUtility.HasPartsToWear(pawn, app.def))
+                                {
+                                    try
+                                    {
+                                        pawn.apparel.Wear(app, true);
+                                        currentSpent += app.MarketValue;
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        Log.Warning($"[FactionGearCustomizer] Failed to wear {app} on {pawn}: {ex.Message}");
+                                        app.Destroy();
+                                    }
+                                }
+                                else
+                                {
+                                    created.Destroy();
+                                }
+                            }
+                            else if (created != null)
+                            {
+                                created.Destroy();
+                            }
                         }
                     }
                 }

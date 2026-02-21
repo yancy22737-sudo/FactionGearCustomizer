@@ -275,7 +275,7 @@ namespace FactionGearCustomizer
             }
 
             bool forceIgnore = FactionGearCustomizerMod.Settings.forceIgnoreRestrictions;
-            if (buttonRow.ButtonText($"Force Ignore: {(forceIgnore ? "ON" : "OFF")}", "Force remove conflicting apparel/weapons and ignore budget limits."))
+            if (buttonRow.ButtonText($"Force Ignore: {(forceIgnore ? "ON" : "OFF")}", "Force remove conflicting apparel/weapons and ignore budget limits. Pawns will attempt to equip all possible items from the configured list which allows you to ignore constraints and always create god-tier units."))
             {
                 FactionGearCustomizerMod.Settings.forceIgnoreRestrictions = !FactionGearCustomizerMod.Settings.forceIgnoreRestrictions;
                 MarkDirty();

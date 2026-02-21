@@ -18,7 +18,7 @@ namespace FactionGearCustomizer
 
         // New fields ported from TotalControl
         public bool ForceNaked = false;
-        public bool ForceOnlySelected = false;
+        public bool ForceOnlySelected = true; // Default to true as requested
         public QualityCategory? ItemQuality = null;
         public QualityCategory? ForcedWeaponQuality = null;
         public float? BiocodeWeaponChance = null;
@@ -140,7 +140,7 @@ namespace FactionGearCustomizer
             isModified = false;
             
             ForceNaked = false;
-            ForceOnlySelected = false;
+            ForceOnlySelected = true; // Default to true
             ItemQuality = null;
             ForcedWeaponQuality = null;
             BiocodeWeaponChance = null;

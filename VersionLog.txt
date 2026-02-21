@@ -1,3 +1,12 @@
+v1.1.2
+- Fix: 修复主菜单界面或世界生成时因 Pawn_ApparelTracker.Wear 抛出 "Could not find player faction" 导致的崩溃问题。
+v1.1.2
+- Fix: 修复 Budget 滑块拖动时不触发保存和撤销记录的问题。
+- Fix: 修复 Force Ignore 开启时会错误剥离 Pawn 身上所有装备的问题。现在它只解除限制，不强制脱光。
+- Fix: 优化 Simple Mode 下的预算检查逻辑，确保逻辑清晰。
+v1.1.1
+- Fix: 修复装备应用逻辑，默认开启多选装备模式，支持同一列表配置多个物品。
+- Add: 新增自定义装备预算检查逻辑，确保非 Force Ignore 模式下遵守 Budget 限制。
 v1.1.0
 - Add: 新增高级编辑器模式，支持Simple/Advanced模式切换
 - Add: Advanced模式提供精确的装备控制（指定物品、材质、品质等）

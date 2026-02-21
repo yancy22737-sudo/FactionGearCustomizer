@@ -5,7 +5,7 @@
     <AssemblyName>FactionGearCustomizer</AssemblyName>
     <RootNamespace>FactionGearCustomizer</RootNamespace>
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
-      <Version>1.0.0</Version>
+      <Version>1.1.2</Version>
   </PropertyGroup>
 
   <ItemGroup>

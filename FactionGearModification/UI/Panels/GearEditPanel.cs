@@ -363,7 +363,7 @@ namespace FactionGearCustomizer.UI.Panels
                 GUI.color = Color.white;
                 Text.Font = GameFont.Small;
                 
-                TooltipHandler.TipRegion(statsRect, "Weight Mechanics: In RimWorld, gear weight acts as a selection weight, not a guarantee.");
+                TooltipHandler.TipRegion(statsRect, "Weight Mechanics: In RimWorld, gear weight acts as a selection weight, not a guarantee. Higher-weight equipment will be prioritized for wearing.");
             }
         }
 
@@ -608,6 +608,22 @@ namespace FactionGearCustomizer.UI.Panels
 
             bool forceIgnore = FactionGearCustomizerMod.Settings.forceIgnoreRestrictions;
 
+            ui.CheckboxLabeled("Force Naked", ref kindData.ForceNaked);
+            if (!kindData.ForceNaked)
+            {
+                // Force Only Selected moved here from Apparel tab
+                bool forceOnly = kindData.ForceOnlySelected;
+                ui.CheckboxLabeled("Force Only Selected", ref forceOnly, "If enabled, ALL existing/vanilla gear will be stripped before applying your custom gear. This ensures the pawn ONLY wears what you specify here, preventing mixed vanilla/custom loadouts.\n\nRecommended: ON for total control.");
+                if (forceOnly != kindData.ForceOnlySelected)
+                {
+                    UndoManager.RecordState(kindData);
+                    kindData.ForceOnlySelected = forceOnly;
+                    FactionGearEditor.MarkDirty();
+                }
+            }
+
+            ui.Gap();
+
             DrawOverrideEnum(ui, "Item Quality", kindData.ItemQuality, val => { UndoManager.RecordState(kindData); kindData.ItemQuality = val; FactionGearEditor.MarkDirty(); });
             DrawOverrideFloatRange(ui, "Apparel Budget", ref kindData.ApparelMoney, val => { UndoManager.RecordState(kindData); kindData.ApparelMoney = val; FactionGearEditor.MarkDirty(); }, forceIgnore);
             DrawOverrideFloatRange(ui, "Weapon Budget", ref kindData.WeaponMoney, val => { UndoManager.RecordState(kindData); kindData.WeaponMoney = val; FactionGearEditor.MarkDirty(); }, forceIgnore);
@@ -643,9 +659,9 @@ namespace FactionGearCustomizer.UI.Panels
         private static void DrawAdvancedApparel(Listing_Standard ui, KindGearData kindData)
         {
             DrawEmbeddedGearList(ui, kindData, GearCategory.Apparel, GearCategory.Armors);
-            ui.CheckboxLabeled("Force Naked", ref kindData.ForceNaked);
-            if (kindData.ForceNaked) return;
-            ui.CheckboxLabeled("Force Only Selected (Strip others)", ref kindData.ForceOnlySelected);
+            
+            // Moved ForceNaked and ForceOnlySelected to General tab
+            
             ui.GapLine();
             WidgetsUtils.Label(ui, "<b>Specific Apparel (Advanced)</b>");
             if (ui.ButtonText("Add New Apparel"))
@@ -768,8 +784,13 @@ namespace FactionGearCustomizer.UI.Panels
                     return;
                 }
                 FloatRange val = range.Value;
+                FloatRange oldVal = val;
                 WidgetsUtils.FloatRange(ui.GetRect(24f), label.GetHashCode(), ref val, 0f, 5000f);
-                range = val;
+                if (val != oldVal)
+                {
+                    setRange(val);
+                    range = val;
+                }
             }
             else
             {
