@@ -1,4 +1,4 @@
-![Steam](https://img.shields.io/badge/Steam-Workshop-blue?logo=steam)
+[![Steam Workshop](https://img.shields.io/badge/Steam-Workshop-blue?logo=steam)](https://steamcommunity.com/sharedfiles/filedetails/?id=3670833973)
 # Faction Gear Modification (派系装备自定义器)
 
 **Faction Gear Modification** 是一个功能强大的 RimWorld 模组，允许玩家在游戏内实时、深度地自定义各个派系（Faction）下具体兵种（PawnKind）的装备配置。无论是想要统一帝国军队的制服，还是给海盗增加致命的生化义体，本模组都能轻松实现。
