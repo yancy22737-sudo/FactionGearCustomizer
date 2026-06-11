@@ -45,6 +45,11 @@
   <AdvancedSettings>Advanced Settings</AdvancedSettings>
   <LayerPreview>Layer Preview</LayerPreview>
   <GeneralOverrides>General Overrides</GeneralOverrides>
+  <ExportApparelTags>Export Apparel Tags</ExportApparelTags>
+  <ExportApparelTagsTooltip>Copies the selected PawnKindDef apparelTags to the clipboard, with configured apparel diagnostics when available.</ExportApparelTagsTooltip>
+  <ApparelTagsExportedToClipboard>Exported {0} apparel tags and {1} configured apparel items to clipboard.</ApparelTagsExportedToClipboard>
+  <NoApparelTagsToExport>No apparel tags found for this pawn kind.</NoApparelTagsToExport>
+  <NoApparelTagsForItem>none</NoApparelTagsForItem>
   <SpecificApparelAdvanced>Specific Apparel (Adv)</SpecificApparelAdvanced>
   <SpecificWeaponsAdvanced>Specific Weapons (Adv)</SpecificWeaponsAdvanced>
   <ForcedHediffs>Forced Hediffs</ForcedHediffs>

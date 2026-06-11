@@ -45,6 +45,11 @@
   <AdvancedSettings>詳細設定</AdvancedSettings>
   <LayerPreview>層预览</LayerPreview>
   <GeneralOverrides>一般設定</GeneralOverrides>
+  <ExportApparelTags>Export Apparel Tags</ExportApparelTags>
+  <ExportApparelTagsTooltip>Copies the selected PawnKindDef apparelTags to the clipboard, with configured apparel diagnostics when available.</ExportApparelTagsTooltip>
+  <ApparelTagsExportedToClipboard>Exported {0} apparel tags and {1} configured apparel items to clipboard.</ApparelTagsExportedToClipboard>
+  <NoApparelTagsToExport>No apparel tags found for this pawn kind.</NoApparelTagsToExport>
+  <NoApparelTagsForItem>none</NoApparelTagsForItem>
   <SpecificApparelAdvanced>指定衣服(詳細)</SpecificApparelAdvanced>
   <SpecificWeaponsAdvanced>指定武器(詳細)</SpecificWeaponsAdvanced>
   <ForcedHediffs>強制状態</ForcedHediffs>

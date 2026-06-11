@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using RimWorld;
 using UnityEngine;
 using Verse;
@@ -806,6 +807,18 @@ namespace FactionGearCustomizer.UI.Panels
 
         private static void DrawAdvancedGeneral(Listing_Standard ui, KindGearData kindData)
         {
+            if (Prefs.DevMode)
+            {
+                Rect exportTagsRect = ui.GetRect(28f);
+                if (Widgets.ButtonText(exportTagsRect, LanguageManager.Get("ExportApparelTags")))
+                {
+                    ExportApparelTagsToClipboard(kindData);
+                }
+                TooltipHandler.TipRegion(exportTagsRect, LanguageManager.Get("ExportApparelTagsTooltip"));
+
+                ui.Gap();
+            }
+
             WidgetsUtils.Label(ui, $"<b>{LanguageManager.Get("GeneralOverrides")}</b>");
             ui.Gap();
 
@@ -959,6 +972,195 @@ namespace FactionGearCustomizer.UI.Panels
                 }
             }
 
+        }
+
+        private static void ExportApparelTagsToClipboard(KindGearData kindData)
+        {
+            PawnKindDef kindDef = GetPawnKindDefForExport(kindData);
+            List<string> pawnKindApparelTags = GetPawnKindApparelTags(kindDef);
+            List<ThingDef> configuredApparelDefs = GetConfiguredApparelDefs(kindData);
+            List<string> configuredApparelTags = GetTagsFromApparelDefs(configuredApparelDefs);
+
+            // Primary export: the PawnKindDef apparelTags that RimWorld uses when generating this pawn kind.
+            // Fallback: if the PawnKindDef has no apparelTags, preserve the previous utility behavior by
+            // deriving tags from manually configured apparel in Faction Editor.
+            List<string> exportTags = pawnKindApparelTags.Count > 0
+                ? pawnKindApparelTags
+                : configuredApparelTags;
+
+            if (exportTags.Count == 0)
+            {
+                Messages.Message(LanguageManager.Get("NoApparelTagsToExport"), MessageTypeDefOf.RejectInput, false);
+                return;
+            }
+
+            StringBuilder builder = new StringBuilder();
+            builder.AppendLine("<!-- Selected pawn kind -->");
+            builder.AppendLine($"<!-- PawnKindDef: {GetPawnKindDefNameForExport(kindData)} -->");
+            builder.AppendLine();
+
+            if (pawnKindApparelTags.Count > 0)
+            {
+                builder.AppendLine("<!-- PawnKindDef apparelTags -->");
+            }
+            else
+            {
+                builder.AppendLine("<!-- Derived from configured apparel items; PawnKindDef has no apparelTags -->");
+            }
+
+            builder.AppendLine("<apparelTags>");
+            foreach (string tag in exportTags.OrderBy(t => t))
+            {
+                builder.AppendLine($"  <li>{tag}</li>");
+            }
+            builder.AppendLine("</apparelTags>");
+            builder.AppendLine();
+
+            if (configuredApparelTags.Count > 0)
+            {
+                builder.AppendLine("<!-- Tags derived from configured apparel items shown in Faction Editor -->");
+                builder.AppendLine("<configuredApparelDerivedTags>");
+                foreach (string tag in configuredApparelTags.OrderBy(t => t))
+                {
+                    builder.AppendLine($"  <li>{tag}</li>");
+                }
+                builder.AppendLine("</configuredApparelDerivedTags>");
+                builder.AppendLine();
+            }
+
+            if (configuredApparelDefs.Count > 0)
+            {
+                builder.AppendLine("<!-- Configured apparel item to tag map -->");
+
+                foreach (ThingDef apparelDef in configuredApparelDefs.OrderBy(d => d.defName))
+                {
+                    builder.AppendLine($"{apparelDef.defName} | {apparelDef.LabelCap}");
+
+                    if (apparelDef.apparel?.tags != null && apparelDef.apparel.tags.Count > 0)
+                    {
+                        builder.AppendLine("  tags: " + string.Join(", ", apparelDef.apparel.tags.OrderBy(t => t).ToArray()));
+                    }
+                    else
+                    {
+                        builder.AppendLine("  tags: " + LanguageManager.Get("NoApparelTagsForItem"));
+                    }
+
+                    builder.AppendLine();
+                }
+            }
+            else
+            {
+                builder.AppendLine("<!-- No configured apparel items found in Faction Editor for this pawn kind. -->");
+            }
+
+            GUIUtility.systemCopyBuffer = builder.ToString().TrimEnd();
+            Messages.Message(LanguageManager.Get("ApparelTagsExportedToClipboard", exportTags.Count, configuredApparelDefs.Count), MessageTypeDefOf.PositiveEvent, false);
+        }
+
+        private static PawnKindDef GetPawnKindDefForExport(KindGearData kindData)
+        {
+            if (kindData == null || string.IsNullOrEmpty(kindData.kindDefName))
+            {
+                return null;
+            }
+
+            return DefDatabase<PawnKindDef>.GetNamedSilentFail(kindData.kindDefName);
+        }
+
+        private static string GetPawnKindDefNameForExport(KindGearData kindData)
+        {
+            PawnKindDef kindDef = GetPawnKindDefForExport(kindData);
+            if (kindDef != null)
+            {
+                return kindDef.defName;
+            }
+
+            if (kindData == null || string.IsNullOrEmpty(kindData.kindDefName))
+            {
+                return "unknown";
+            }
+
+            return kindData.kindDefName;
+        }
+
+        private static List<string> GetPawnKindApparelTags(PawnKindDef kindDef)
+        {
+            if (kindDef?.apparelTags == null)
+            {
+                return new List<string>();
+            }
+
+            return kindDef.apparelTags
+                .Where(tag => !string.IsNullOrWhiteSpace(tag))
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+        }
+
+        private static List<string> GetTagsFromApparelDefs(List<ThingDef> apparelDefs)
+        {
+            if (apparelDefs.NullOrEmpty())
+            {
+                return new List<string>();
+            }
+
+            return apparelDefs
+                .Where(def => def?.apparel?.tags != null)
+                .SelectMany(def => def.apparel.tags)
+                .Where(tag => !string.IsNullOrWhiteSpace(tag))
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+        }
+
+        private static List<ThingDef> GetConfiguredApparelDefs(KindGearData kindData)
+        {
+            List<ThingDef> result = new List<ThingDef>();
+            HashSet<string> seenDefNames = new HashSet<string>(StringComparer.Ordinal);
+
+            AddGearItemDefs(kindData?.apparel, result, seenDefNames);
+            AddGearItemDefs(kindData?.armors, result, seenDefNames);
+            AddGearItemDefs(kindData?.others, result, seenDefNames);
+            AddThingDefs(kindData?.ApparelRequired, result, seenDefNames);
+
+            if (kindData != null && !kindData.SpecificApparel.NullOrEmpty())
+            {
+                foreach (SpecRequirementEdit item in kindData.SpecificApparel)
+                {
+                    AddApparelDef(item?.Thing, result, seenDefNames);
+                }
+            }
+
+            return result;
+        }
+
+        private static void AddGearItemDefs(List<GearItem> gearItems, List<ThingDef> result, HashSet<string> seenDefNames)
+        {
+            if (gearItems.NullOrEmpty()) return;
+
+            foreach (GearItem gearItem in gearItems)
+            {
+                AddApparelDef(gearItem?.ThingDef, result, seenDefNames);
+            }
+        }
+
+        private static void AddThingDefs(List<ThingDef> thingDefs, List<ThingDef> result, HashSet<string> seenDefNames)
+        {
+            if (thingDefs.NullOrEmpty()) return;
+
+            foreach (ThingDef thingDef in thingDefs)
+            {
+                AddApparelDef(thingDef, result, seenDefNames);
+            }
+        }
+
+        private static void AddApparelDef(ThingDef thingDef, List<ThingDef> result, HashSet<string> seenDefNames)
+        {
+            if (thingDef == null || !thingDef.IsApparel) return;
+            if (string.IsNullOrEmpty(thingDef.defName)) return;
+
+            if (seenDefNames.Add(thingDef.defName))
+            {
+                result.Add(thingDef);
+            }
         }
 
         private static void DrawAdvancedApparel(Listing_Standard ui, KindGearData kindData)
