@@ -45,6 +45,11 @@
   <AdvancedSettings>高级</AdvancedSettings>
   <LayerPreview>层级预览</LayerPreview>
   <GeneralOverrides>常规覆盖</GeneralOverrides>
+  <ExportApparelTags>Export Apparel Tags</ExportApparelTags>
+  <ExportApparelTagsTooltip>Copies the apparel tags from all configured apparel for this pawn kind to the clipboard.</ExportApparelTagsTooltip>
+  <ApparelTagsExportedToClipboard>Exported {0} apparel items and {1} unique apparel tags to clipboard.</ApparelTagsExportedToClipboard>
+  <NoApparelTagsToExport>No configured apparel found for this pawn kind.</NoApparelTagsToExport>
+  <NoApparelTagsForItem>none</NoApparelTagsForItem>
   <SpecificApparelAdvanced>指定服装( 高级) </SpecificApparelAdvanced>
   <SpecificWeaponsAdvanced>指定武器( 高级) </SpecificWeaponsAdvanced>
   <ForcedHediffs>强制状态</ForcedHediffs>

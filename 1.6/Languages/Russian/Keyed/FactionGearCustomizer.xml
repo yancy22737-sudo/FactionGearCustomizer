@@ -45,6 +45,11 @@
   <AdvancedSettings>Расш. настройки</AdvancedSettings>
   <LayerPreview>Слои</LayerPreview>
   <GeneralOverrides>Общие</GeneralOverrides>
+  <ExportApparelTags>Export Apparel Tags</ExportApparelTags>
+  <ExportApparelTagsTooltip>Copies the apparel tags from all configured apparel for this pawn kind to the clipboard.</ExportApparelTagsTooltip>
+  <ApparelTagsExportedToClipboard>Exported {0} apparel items and {1} unique apparel tags to clipboard.</ApparelTagsExportedToClipboard>
+  <NoApparelTagsToExport>No configured apparel found for this pawn kind.</NoApparelTagsToExport>
+  <NoApparelTagsForItem>none</NoApparelTagsForItem>
   <SpecificApparelAdvanced>Одежда (расш.)</SpecificApparelAdvanced>
   <SpecificWeaponsAdvanced>Оружие (расш.)</SpecificWeaponsAdvanced>
   <ForcedHediffs>Состояния</ForcedHediffs>
